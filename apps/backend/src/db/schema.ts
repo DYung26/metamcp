@@ -245,6 +245,7 @@ export const namespacesTable = pgTable(
     uuid: uuid("uuid").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     description: text("description"),
+    tool_partition_count: integer("tool_partition_count").notNull().default(1),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

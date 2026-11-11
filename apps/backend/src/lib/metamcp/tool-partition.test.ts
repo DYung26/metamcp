@@ -56,6 +56,20 @@ describe("parseToolPartition", () => {
     });
   });
 
+  it("uses the namespace-configured total when clients only send an index", () => {
+    expect(parseToolPartition("2", undefined, 3)).toEqual({
+      partition: { index: 2, total: 3 },
+    });
+  });
+
+  it("rejects a client-supplied total that differs from namespace configuration", () => {
+    expect(parseToolPartition("0", "4", 3)).toHaveProperty("error");
+  });
+
+  it("rejects a partition index when the namespace is configured for one partition", () => {
+    expect(parseToolPartition("0", undefined, 1)).toHaveProperty("error");
+  });
+
   it("keeps unpartitioned endpoints backward compatible", () => {
     expect(parseToolPartition(undefined, undefined)).toEqual({
       partition: undefined,

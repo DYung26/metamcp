@@ -46,9 +46,11 @@ function parseRequestToolPartition(
   req: express.Request,
   res: express.Response,
 ): { index: number; total: number } | undefined | null {
+  const authReq = req as ApiKeyAuthenticatedRequest;
   const result = parseToolPartition(
     req.query.toolPartition,
     req.query.toolPartitions,
+    authReq.toolPartitionCount,
   );
   if (result.error) {
     res.status(400).json({

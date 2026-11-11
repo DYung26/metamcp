@@ -74,6 +74,7 @@ export default function NamespacesPage() {
         form.reset({
           name: "",
           description: "",
+          tool_partition_count: 1,
           user_id: undefined, // Default to "For myself" (Private)
         });
         setSelectedServerUuids([]);
@@ -101,6 +102,7 @@ export default function NamespacesPage() {
     defaultValues: {
       name: "",
       description: "",
+      tool_partition_count: 1,
       mcpServerUuids: [],
       user_id: undefined, // Default to "For myself" (Private)
     },
@@ -113,6 +115,7 @@ export default function NamespacesPage() {
       const apiPayload: CreateNamespaceRequest = {
         name: data.name,
         description: data.description,
+        tool_partition_count: data.tool_partition_count,
         mcpServerUuids: selectedServerUuids,
         user_id: data.user_id,
       };
@@ -198,6 +201,34 @@ export default function NamespacesPage() {
                     placeholder={t("namespaces:descriptionPlaceholder")}
                     className="h-20"
                   />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label
+                    htmlFor="tool-partition-count"
+                    className="text-sm font-medium"
+                  >
+                    Tool-list partitions (1–100)
+                  </label>
+                  <Input
+                    id="tool-partition-count"
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
+                    {...form.register("tool_partition_count", {
+                      valueAsNumber: true,
+                    })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Set to 1 for a single connector. Larger namespaces can be
+                    split across this many Streamable HTTP connector URLs.
+                  </p>
+                  {form.formState.errors.tool_partition_count && (
+                    <p className="text-sm text-red-500">
+                      {form.formState.errors.tool_partition_count.message}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-2">

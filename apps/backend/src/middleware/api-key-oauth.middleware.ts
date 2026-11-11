@@ -14,6 +14,7 @@ export interface ApiKeyAuthenticatedRequest extends express.Request {
   namespaceUuid: string;
   endpointName: string;
   endpoint: DatabaseEndpoint;
+  toolPartitionCount: number;
   apiKeyUserId?: string;
   apiKeyUuid?: string;
   oauthUserId?: string; // For OAuth-authenticated requests

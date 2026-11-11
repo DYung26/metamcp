@@ -13,6 +13,7 @@ const ToolAnnotationsSchema = z.record(z.string(), z.unknown());
 export const createNamespaceFormSchema = z.object({
   name: z.string().min(1, "validation:namespaceName.required"),
   description: z.string().optional(),
+  tool_partition_count: z.number().int().min(1).max(100).optional(),
   mcpServerUuids: z.array(z.string()).optional(),
   user_id: z.string().nullable().optional(),
 });
@@ -22,6 +23,7 @@ export type CreateNamespaceFormData = z.infer<typeof createNamespaceFormSchema>;
 export const editNamespaceFormSchema = z.object({
   name: z.string().min(1, "validation:namespaceName.required"),
   description: z.string().optional(),
+  tool_partition_count: z.number().int().min(1).max(100).optional(),
   mcpServerUuids: z.array(z.string()).optional(),
   user_id: z.string().nullable().optional(),
 });
@@ -31,6 +33,7 @@ export type EditNamespaceFormData = z.infer<typeof editNamespaceFormSchema>;
 export const CreateNamespaceRequestSchema = z.object({
   name: z.string().min(1, "validation:namespaceName.required"),
   description: z.string().optional(),
+  tool_partition_count: z.number().int().min(1).max(100).optional(),
   mcpServerUuids: z.array(z.string()).optional(),
   user_id: z.string().nullable().optional(),
 });
@@ -39,6 +42,7 @@ export const NamespaceSchema = z.object({
   uuid: z.string(),
   name: z.string(),
   description: z.string().nullable(),
+  tool_partition_count: z.number().int().min(1).max(100).optional(),
   created_at: z.string(),
   updated_at: z.string(),
   user_id: z.string().nullable(),
@@ -98,6 +102,7 @@ export const UpdateNamespaceRequestSchema = z.object({
   uuid: z.string(),
   name: z.string().min(1, "validation:namespaceName.required"),
   description: z.string().optional(),
+  tool_partition_count: z.number().int().min(1).max(100).optional(),
   mcpServerUuids: z.array(z.string()).optional(),
   user_id: z.string().nullable().optional(),
 });
@@ -234,6 +239,7 @@ export type UpdateNamespaceToolOverridesResponse = z.infer<
 export const NamespaceCreateInputSchema = z.object({
   name: z.string(),
   description: z.string().nullable().optional(),
+  tool_partition_count: z.number().int().min(1).max(100).optional(),
   mcpServerUuids: z.array(z.string()).optional(),
   user_id: z.string().nullable().optional(),
 });
@@ -242,6 +248,7 @@ export const NamespaceUpdateInputSchema = z.object({
   uuid: z.string(),
   name: z.string(),
   description: z.string().nullable().optional(),
+  tool_partition_count: z.number().int().min(1).max(100).optional(),
   mcpServerUuids: z.array(z.string()).optional(),
   user_id: z.string().nullable().optional(),
 });
@@ -286,6 +293,7 @@ export const DatabaseNamespaceSchema = z.object({
   uuid: z.string(),
   name: z.string(),
   description: z.string().nullable(),
+  tool_partition_count: z.number().int().min(1).max(100),
   created_at: z.date(),
   updated_at: z.date(),
   user_id: z.string().nullable(),

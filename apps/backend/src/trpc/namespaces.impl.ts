@@ -87,6 +87,7 @@ export const namespacesImplementations = {
       const result = await namespacesRepository.create({
         name: input.name,
         description: input.description,
+        tool_partition_count: input.tool_partition_count,
         mcpServerUuids: input.mcpServerUuids,
         user_id: effectiveUserId,
       });
@@ -383,6 +384,7 @@ export const namespacesImplementations = {
         uuid: input.uuid,
         name: input.name,
         description: input.description,
+        tool_partition_count: input.tool_partition_count,
         user_id: input.user_id,
         mcpServerUuids: input.mcpServerUuids,
       });

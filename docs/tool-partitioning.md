@@ -1,24 +1,15 @@
-# Exposing large MCP namespaces
+# MCP tool-list partitioning
 
-Some MCP clients enforce a hard maximum of 1,000 tools per connector. MetaMCP keeps the complete namespace intact and supports deterministic tool partitions for clients that need to access a larger namespace.
+Some MCP clients enforce a hard maximum of 1,000 tools per connector. Configure the partition count on a namespace (Namespaces → Edit → Tool-list partitions). The value is stored with the namespace and applies to every Streamable HTTP endpoint backed by it. Use `1` for a single connector; use `2`–`100` to expose stable, disjoint slices.
 
-Use the same public Streamable HTTP endpoint with two query parameters:
-
-- `toolPartitions`: total number of partitions (2100).
-- `toolPartition`: zero-based partition index (`0` through `toolPartitions - 1`).
-
-For a namespace with 2,032 tools, configure three connector entries using the same endpoint URL and authentication:
+MetaMCP owns the partition count. Connector URLs only specify the zero-based partition index; `toolPartitions` is optional for backwards compatibility and, if supplied, must match the server configuration. For a namespace configured for three partitions, the URLs are:
 
 ```text
-https://YOUR_METAMCP_HOST/metamcp/YOUR_ENDPOINT/mcp?toolPartition=0&toolPartitions=3
-https://YOUR_METAMCP_HOST/metamcp/YOUR_ENDPOINT/mcp?toolPartition=1&toolPartitions=3
-https://YOUR_METAMCP_HOST/metamcp/YOUR_ENDPOINT/mcp?toolPartition=2&toolPartitions=3
+https://YOUR_METAMCP_HOST/metamcp/YOUR_ENDPOINT/mcp?toolPartition=0
+https://YOUR_METAMCP_HOST/metamcp/YOUR_ENDPOINT/mcp?toolPartition=1
+https://YOUR_METAMCP_HOST/metamcp/YOUR_ENDPOINT/mcp?toolPartition=2
 ```
 
-Each tool name is assigned to exactly one partition using a stable hash. A tool remains in the same partition across sessions and discovery refreshes. Tool calls are checked against the session's partition, so a client cannot call a tool hidden from its partition. Each partition fails clearly if its assigned list exceeds the configured client limit rather than silently dropping tools.
+Tool assignment uses a stable hash of the exposed name. Each tool belongs to exactly one partition across sessions and refreshes. Calls are checked against the session partition, including MetaMCP admin tools. A partition exceeding the configured 1,000-tool cap fails explicitly instead of silently dropping tools.
 
-The parameters must be supplied together. Invalid values are rejected with HTTP 400. Without partition parameters, the endpoint retains the backwards-compatible 1,000-tool cap and logs how many tools were omitted. Use enough partitions that each resulting list remains at or below 1,000 tools.
-
-## Background startup limits
-
-MetaMCP limits background discovery and upstream connection establishment independently. Both default to four concurrent operations and can be tuned with MCP_DISCOVERY_CONCURRENCY and MCP_BACKEND_CONNECTION_CONCURRENCY respectively (each is clamped to 116).
+Existing URLs without `toolPartition` retain their previous unpartitioned behavior and 1,000-tool cap. Existing clients that send both `toolPartition` and `toolPartitions` continue working when the supplied total matches the namespace configuration. Changing the configured count changes assignments and requires reconnecting affected clients.

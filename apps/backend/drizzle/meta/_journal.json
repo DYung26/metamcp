@@ -141,6 +141,13 @@
       "when": 1794383583359,
       "tag": "0019_tool_annotations",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794430945927,
+      "tag": "0020_namespace_tool_partition_count",
+      "breakpoints": true
     }
   ]
 }
