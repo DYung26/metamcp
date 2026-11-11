@@ -4,6 +4,7 @@ import logger from "@/utils/logger";
 
 import { configService } from "../config.service";
 import { ConnectedClient, connectMetaMcpClient } from "./client";
+import { createConcurrencyLimiter } from "./discovery-concurrency";
 import { serverRequiresForwardedHeaders } from "./header-forwarding";
 import { metamcpLogStore } from "./log-store";
 import { serverErrorTracker } from "./server-error-tracker";
@@ -16,6 +17,20 @@ export interface McpServerPoolStatus {
   perServerCounts?: Record<string, number>;
   maxConnectionsPerServer?: number;
 }
+
+const maxConcurrentBackendConnections = Math.max(
+  1,
+  Math.min(
+    16,
+    Number.parseInt(
+      process.env.MCP_BACKEND_CONNECTION_CONCURRENCY || "4",
+      10,
+    ) || 4,
+  ),
+);
+const withBackendConnectionConcurrency = createConcurrencyLimiter(
+  maxConcurrentBackendConnections,
+);
 
 export class McpServerPool {
   // Singleton instance
@@ -315,7 +330,9 @@ export class McpServerPool {
     }
 
     const generation = this.serverConnectionGenerations[serverUuid] ?? 0;
-    const connectionPromise = this.createNewConnection(params, namespaceUuid);
+    const connectionPromise = withBackendConnectionConcurrency(() =>
+      this.createNewConnection(params, namespaceUuid),
+    );
     const canShareConnection = !serverRequiresForwardedHeaders(params);
     if (canShareConnection) {
       this.pendingConnectionPromises.set(serverUuid, connectionPromise);
@@ -498,7 +515,9 @@ export class McpServerPool {
     const generation = this.serverConnectionGenerations[serverUuid] ?? 0;
 
     try {
-      const newClient = await this.createNewConnection(params, namespaceUuid);
+      const newClient = await withBackendConnectionConcurrency(() =>
+        this.createNewConnection(params, namespaceUuid),
+      );
       if (newClient) {
         const currentGeneration =
           this.serverConnectionGenerations[serverUuid] ?? 0;
@@ -562,7 +581,9 @@ export class McpServerPool {
     const generation = this.serverConnectionGenerations[serverUuid] ?? 0;
 
     // Create the session in the background (fire and forget)
-    this.createNewConnection(params, namespaceUuid)
+    withBackendConnectionConcurrency(() =>
+      this.createNewConnection(params, namespaceUuid),
+    )
       .then((newClient) => {
         const currentGeneration =
           this.serverConnectionGenerations[serverUuid] ?? 0;

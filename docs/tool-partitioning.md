@@ -18,3 +18,7 @@ https://YOUR_METAMCP_HOST/metamcp/YOUR_ENDPOINT/mcp?toolPartition=2&toolPartitio
 Each tool name is assigned to exactly one partition using a stable hash. A tool remains in the same partition across sessions and discovery refreshes. Tool calls are checked against the session's partition, so a client cannot call a tool hidden from its partition. Each partition fails clearly if its assigned list exceeds the configured client limit rather than silently dropping tools.
 
 The parameters must be supplied together. Invalid values are rejected with HTTP 400. Without partition parameters, the endpoint retains the backwards-compatible 1,000-tool cap and logs how many tools were omitted. Use enough partitions that each resulting list remains at or below 1,000 tools.
+
+## Background startup limits
+
+MetaMCP limits background discovery and upstream connection establishment independently. Both default to four concurrent operations and can be tuned with MCP_DISCOVERY_CONCURRENCY and MCP_BACKEND_CONNECTION_CONCURRENCY respectively (each is clamped to 116).
