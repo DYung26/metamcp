@@ -91,6 +91,7 @@ export class EndpointsSerializer {
         uuid: dbEndpoint.namespace.uuid,
         name: dbEndpoint.namespace.name,
         description: dbEndpoint.namespace.description,
+        tool_partition_count: dbEndpoint.namespace.tool_partition_count,
         created_at: dbEndpoint.namespace.created_at.toISOString(),
         updated_at: dbEndpoint.namespace.updated_at.toISOString(),
         user_id: dbEndpoint.namespace.user_id,

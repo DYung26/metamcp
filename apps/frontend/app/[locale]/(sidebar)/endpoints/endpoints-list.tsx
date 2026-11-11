@@ -169,22 +169,30 @@ export function EndpointsList({ onRefresh }: EndpointsListProps) {
                   <Copy className="h-2 w-2" />
                 </Button>
               </div>
-              <div className="flex items-center gap-2">
-                <span>
-                  Streamable HTTP: {getAppUrl()}/metamcp/{endpoint.name}/mcp
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-2 w-2 p-0 hover:bg-muted"
-                  onClick={() => {
-                    const url = `${getAppUrl()}/metamcp/${endpoint.name}/mcp`;
-                    navigator.clipboard.writeText(url);
-                    toast.success(t("endpoints:list.shttpUrlCopied"));
-                  }}
-                >
-                  <Copy className="h-2 w-2" />
-                </Button>
+              <div className="space-y-1">
+                <div className="font-medium">Streamable HTTP</div>
+                {Array.from(
+                  { length: endpoint.namespace.tool_partition_count ?? 1 },
+                  (_, index) => ({
+                    index,
+                    url: `${getAppUrl()}/metamcp/${endpoint.name}/mcp${(endpoint.namespace.tool_partition_count ?? 1) > 1 ? `?toolPartition=${index}` : ""}`,
+                  }),
+                ).map(({ index, url }) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="break-all">{url}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-2 w-2 shrink-0 p-0 hover:bg-muted"
+                      onClick={() => {
+                        navigator.clipboard.writeText(url);
+                        toast.success(t("endpoints:list.shttpUrlCopied"));
+                      }}
+                    >
+                      <Copy className="h-2 w-2" />
+                    </Button>
+                  </div>
+                ))}
               </div>
               <div className="flex items-center gap-2">
                 <span>
@@ -311,7 +319,11 @@ export function EndpointsList({ onRefresh }: EndpointsListProps) {
         };
 
         const copyFullShttpUrl = () => {
-          const baseUrl = `${getAppUrl()}/metamcp/${endpoint.name}/mcp`;
+          const baseUrl = Array.from(
+            { length: endpoint.namespace.tool_partition_count ?? 1 },
+            (_, index) =>
+              `${getAppUrl()}/metamcp/${endpoint.name}/mcp${(endpoint.namespace.tool_partition_count ?? 1) > 1 ? `?toolPartition=${index}` : ""}`,
+          ).join("\n");
           navigator.clipboard.writeText(baseUrl);
           toast.success(t("endpoints:list.shttpUrlCopied"));
         };
@@ -343,7 +355,11 @@ export function EndpointsList({ onRefresh }: EndpointsListProps) {
 
         const copyFullShttpUrlWithApiKey = () => {
           const apiKey = getApiKey();
-          const baseUrl = `${getAppUrl()}/metamcp/${endpoint.name}/mcp?api_key=${apiKey}`;
+          const baseUrl = Array.from(
+            { length: endpoint.namespace.tool_partition_count ?? 1 },
+            (_, index) =>
+              `${getAppUrl()}/metamcp/${endpoint.name}/mcp?${(endpoint.namespace.tool_partition_count ?? 1) > 1 ? `toolPartition=${index}&` : ""}api_key=${apiKey}`,
+          ).join("\n");
           navigator.clipboard.writeText(baseUrl);
           toast.success(t("endpoints:list.shttpUrlWithApiKeyCopied"));
         };

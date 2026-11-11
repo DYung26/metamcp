@@ -3,6 +3,7 @@ import express from "express";
 import logger from "@/utils/logger";
 
 import { endpointsRepository } from "../db/repositories/endpoints.repo";
+import { namespacesRepository } from "../db/repositories/namespaces.repo";
 import { ApiKeyAuthenticatedRequest } from "./api-key-oauth.middleware";
 
 // Middleware to lookup endpoint by name and add namespace info to request
@@ -28,6 +29,10 @@ export const lookupEndpoint = async (
     authReq.namespaceUuid = endpoint.namespace_uuid;
     authReq.endpointName = endpointName;
     authReq.endpoint = endpoint;
+    const namespace = await namespacesRepository.findByUuid(
+      endpoint.namespace_uuid,
+    );
+    authReq.toolPartitionCount = namespace?.tool_partition_count ?? 1;
 
     next();
   } catch (error) {

@@ -115,6 +115,7 @@ export function EditNamespace({
     defaultValues: {
       name: "",
       description: "",
+      tool_partition_count: 1,
       mcpServerUuids: [],
       user_id: undefined,
     },
@@ -129,6 +130,7 @@ export function EditNamespace({
       editForm.reset({
         name: namespace.name,
         description: namespace.description || "",
+        tool_partition_count: namespace.tool_partition_count ?? 1,
         mcpServerUuids: serverUuids,
         user_id: namespace.user_id,
       });
@@ -160,6 +162,7 @@ export function EditNamespace({
         uuid: namespace.uuid,
         name: data.name,
         description: data.description,
+        tool_partition_count: data.tool_partition_count,
         mcpServerUuids: selectedServerUuids,
         user_id: data.user_id,
       };
@@ -183,6 +186,7 @@ export function EditNamespace({
     editForm.reset({
       name: "",
       description: "",
+      tool_partition_count: 1,
       mcpServerUuids: [],
       user_id: undefined,
     });
@@ -239,6 +243,31 @@ export function EditNamespace({
                   {editForm.formState.errors.description.message}
                 </p>
               )}
+            </div>
+
+            {/* MCP tool-list partition count */}
+            <div className="space-y-2">
+              <label
+                htmlFor="edit-tool-partition-count"
+                className="text-sm font-medium"
+              >
+                Tool-list partitions (1–100)
+              </label>
+              <Input
+                id="edit-tool-partition-count"
+                type="number"
+                min={1}
+                max={100}
+                step={1}
+                {...editForm.register("tool_partition_count", {
+                  valueAsNumber: true,
+                })}
+                disabled={isUpdating}
+              />
+              <p className="text-xs text-muted-foreground">
+                Set to 1 for a single connector. Larger namespaces can be split
+                across this many Streamable HTTP connector URLs.
+              </p>
             </div>
 
             {/* Namespace Ownership */}

@@ -26,6 +26,7 @@ export class NamespacesRepository {
         .values({
           name: input.name,
           description: input.description,
+          tool_partition_count: input.tool_partition_count ?? 1,
           user_id: input.user_id,
         })
         .returning();
@@ -75,6 +76,7 @@ export class NamespacesRepository {
         uuid: namespacesTable.uuid,
         name: namespacesTable.name,
         description: namespacesTable.description,
+        tool_partition_count: namespacesTable.tool_partition_count,
         created_at: namespacesTable.created_at,
         updated_at: namespacesTable.updated_at,
         user_id: namespacesTable.user_id,
@@ -90,6 +92,7 @@ export class NamespacesRepository {
         uuid: namespacesTable.uuid,
         name: namespacesTable.name,
         description: namespacesTable.description,
+        tool_partition_count: namespacesTable.tool_partition_count,
         created_at: namespacesTable.created_at,
         updated_at: namespacesTable.updated_at,
         user_id: namespacesTable.user_id,
@@ -111,6 +114,7 @@ export class NamespacesRepository {
         uuid: namespacesTable.uuid,
         name: namespacesTable.name,
         description: namespacesTable.description,
+        tool_partition_count: namespacesTable.tool_partition_count,
         created_at: namespacesTable.created_at,
         updated_at: namespacesTable.updated_at,
         user_id: namespacesTable.user_id,
@@ -127,6 +131,7 @@ export class NamespacesRepository {
         uuid: namespacesTable.uuid,
         name: namespacesTable.name,
         description: namespacesTable.description,
+        tool_partition_count: namespacesTable.tool_partition_count,
         created_at: namespacesTable.created_at,
         updated_at: namespacesTable.updated_at,
         user_id: namespacesTable.user_id,
@@ -142,6 +147,7 @@ export class NamespacesRepository {
         uuid: namespacesTable.uuid,
         name: namespacesTable.name,
         description: namespacesTable.description,
+        tool_partition_count: namespacesTable.tool_partition_count,
         created_at: namespacesTable.created_at,
         updated_at: namespacesTable.updated_at,
         user_id: namespacesTable.user_id,
@@ -162,6 +168,7 @@ export class NamespacesRepository {
         uuid: namespacesTable.uuid,
         name: namespacesTable.name,
         description: namespacesTable.description,
+        tool_partition_count: namespacesTable.tool_partition_count,
         created_at: namespacesTable.created_at,
         updated_at: namespacesTable.updated_at,
         user_id: namespacesTable.user_id,
@@ -297,6 +304,7 @@ export class NamespacesRepository {
         .set({
           name: input.name,
           description: input.description,
+          tool_partition_count: input.tool_partition_count,
           user_id: input.user_id,
           updated_at: new Date(),
         })
