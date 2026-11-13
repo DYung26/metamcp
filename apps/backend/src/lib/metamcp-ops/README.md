@@ -17,11 +17,15 @@ The API key is stored on the VPS in `/home/dyung/.config/metamcp-ops/env` as `ME
 
 ## MetaMCP administration
 
-MetaMCP's built-in admin tools are separate from this infrastructure service. When an endpoint has `enable_metamcp_admin_tools=true` and API-key or OAuth authentication enabled, MetaMCP injects its admin tools into that endpoint's tool list under the `metamcp-admin__` prefix.
+The MetaMCP administration tools in this repository are a custom extension in the `DYung26/metamcp` fork. They are not part of the stock upstream MetaMCP image by default.
 
-Those tools cover MCP server CRUD and bulk import; namespace CRUD, server membership, server/tool status and tool overrides; endpoint CRUD; API-key management; tool lookup and sync; OAuth sessions; configuration; and logs. They are not a separately registered upstream server. They are available on the authenticated endpoint itself and operate on the MetaMCP instance serving that endpoint.
+When a public MCP endpoint has `enable_metamcp_admin_tools=true` and API-key or OAuth authentication enabled, the Streamable HTTP and SSE routes resolve the authenticated user and attach that user context to the MCP session. The endpoint then exposes the management tools under the `metamcp-admin__` prefix. Tool calls operate on the MetaMCP instance serving that endpoint. The endpoint edit UI exposes the setting.
 
-The `metamcp-ops` server below is for infrastructure operations across the three hosts. It does not provide MetaMCP database CRUD for the Arch or Omarchy instances. Those instances need their own admin-tools support and endpoint configuration before their MetaMCP records can be managed remotely.
+The extension covers MCP server CRUD and bulk import; namespace CRUD, server membership, tool status and overrides; endpoint CRUD; API-key management; tool lookup and sync; OAuth sessions; configuration; and logs.
+
+The registry currently contains 52 management tools. They are placed before namespace tools in `tools/list` results, and the configured exposure limit reserves capacity for all of them. With the default 100-tool page size, all 52 appear on the first MCP tools/list page even when a namespace contains thousands of upstream tools. When tool partitions are used, the admin tools are included in each partition.
+
+The `metamcp-ops` server is separate from this extension. It provides infrastructure controls across the three hosts; it does not provide MetaMCP database CRUD for Arch or Omarchy unless the same custom MetaMCP code is deployed and enabled on those instances.
 
 ## Configuration
 

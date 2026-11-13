@@ -66,6 +66,7 @@ import {
   createToolOverridesListToolsMiddleware,
 } from "./metamcp-middleware/tool-overrides.functional";
 import { isRecoverableBackendError } from "./session-error";
+import { prioritizeAdminTools } from "./tool-list-prioritization";
 import { parseToolName } from "./tool-name-parser";
 import { isToolInPartition } from "./tool-partition";
 import { toolsSyncCache } from "./tools-sync-cache";
@@ -98,38 +99,6 @@ const configuredToolListLimit = Number.parseInt(
 const maxExposedTools = Number.isFinite(configuredToolListLimit)
   ? Math.max(1, Math.min(configuredToolListLimit, 1000))
   : 1000;
-
-function limitToolsFairly(tools: Tool[], limit: number): Tool[] {
-  if (tools.length <= limit) return tools;
-
-  const groups = new Map<string, Tool[]>();
-  for (const tool of tools) {
-    const separator = tool.name.indexOf("__");
-    const key = separator > 0 ? tool.name.slice(0, separator) : "_meta";
-    groups.set(key, [...(groups.get(key) || []), tool]);
-  }
-
-  const queues = [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, items]) => ({
-      items: items.sort((a, b) => a.name.localeCompare(b.name)),
-      index: 0,
-    }));
-  const selected: Tool[] = [];
-  while (selected.length < limit) {
-    let added = false;
-    for (const queue of queues) {
-      const tool = queue.items[queue.index];
-      if (!tool) continue;
-      selected.push(tool);
-      queue.index += 1;
-      added = true;
-      if (selected.length === limit) break;
-    }
-    if (!added) break;
-  }
-  return selected;
-}
 
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -685,29 +654,36 @@ export const createServer = async (
       handlerContext,
     );
     const adminContext = getAdminToolsContext(handlerContext.sessionId);
-    if (adminContext?.enabled && adminContext.userId) {
-      result.tools.push(...getAdminToolsForMcp());
-    }
-
-    const totalToolCount = result.tools.length;
+    const adminTools =
+      adminContext?.enabled && adminContext.userId ? getAdminToolsForMcp() : [];
+    const namespaceTools = result.tools;
+    const totalToolCount = namespaceTools.length + adminTools.length;
     const partition = handlerContext.toolPartition;
+
     if (partition) {
-      result.tools = result.tools.filter((tool) =>
+      const partitionTools = namespaceTools.filter((tool) =>
         isToolInPartition(tool.name, partition),
       );
-      if (result.tools.length > maxExposedTools) {
-        throw new Error(
-          `Tool partition ${partition.index + 1}/${partition.total} contains ${result.tools.length} tools, exceeding the ${maxExposedTools}-tool client limit. Increase toolPartitions.`,
-        );
-      }
+      result.tools = prioritizeAdminTools(
+        partitionTools,
+        adminTools,
+        maxExposedTools,
+        { partitioned: true },
+      );
       logger.info(
         `Namespace ${namespaceUuid} exposes partition ${partition.index + 1}/${partition.total}: ${result.tools.length}/${totalToolCount} tools.`,
       );
-    } else if (totalToolCount > maxExposedTools) {
-      result.tools = limitToolsFairly(result.tools, maxExposedTools);
-      logger.warn(
-        `Namespace ${namespaceUuid} exposes ${totalToolCount} tools; limiting this endpoint to ${maxExposedTools} (${totalToolCount - maxExposedTools} omitted). Configure toolPartition and toolPartitions query parameters to expose the complete tool set across multiple endpoints.`,
+    } else {
+      result.tools = prioritizeAdminTools(
+        namespaceTools,
+        adminTools,
+        maxExposedTools,
       );
+      if (totalToolCount > maxExposedTools) {
+        logger.warn(
+          `Namespace ${namespaceUuid} exposes ${totalToolCount} tools; limiting this endpoint to ${maxExposedTools} (${totalToolCount - maxExposedTools} omitted). Configure toolPartition and toolPartitions query parameters to expose the complete tool set across multiple endpoints.`,
+        );
+      }
     }
 
     const snapshotId = randomUUID();
