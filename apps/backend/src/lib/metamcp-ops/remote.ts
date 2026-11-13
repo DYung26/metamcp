@@ -3,10 +3,19 @@ import { join } from "node:path";
 
 import { execa } from "execa";
 
-import { METAMCP_HOSTS, type ContainerAction, type MetaMcpHostId } from "./hosts";
+import {
+  type ContainerAction,
+  METAMCP_HOSTS,
+  type MetaMcpHostId,
+} from "./hosts";
 
 const SSH_CONNECT_TIMEOUT_SECONDS = 8;
-const SSH_KNOWN_HOSTS_FILE = join(homedir(), ".config", "metamcp-ops", "known_hosts");
+const SSH_KNOWN_HOSTS_FILE = join(
+  homedir(),
+  ".config",
+  "metamcp-ops",
+  "known_hosts",
+);
 const SSH_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_LOG_LINES = 500;
 const DEFAULT_LOG_LINES = 100;
@@ -24,10 +33,14 @@ async function runRemoteCommand(
   const { stdout } = await execa(
     "ssh",
     [
-      "-o", "BatchMode=yes",
-      "-o", `ConnectTimeout=${SSH_CONNECT_TIMEOUT_SECONDS}`,
-      "-o", "StrictHostKeyChecking=yes",
-      "-o", `UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}`,
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      `ConnectTimeout=${SSH_CONNECT_TIMEOUT_SECONDS}`,
+      "-o",
+      "StrictHostKeyChecking=yes",
+      "-o",
+      `UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}`,
       host.hostname,
       command,
     ],
@@ -44,7 +57,9 @@ export async function checkHostHealth(hostId: MetaMcpHostId) {
   });
   const body = await response.text();
   if (!response.ok) {
-    throw new Error(`${host.label} health check failed with HTTP ${response.status}: ${body.slice(0, 300)}`);
+    throw new Error(
+      `${host.label} health check failed with HTTP ${response.status}: ${body.slice(0, 300)}`,
+    );
   }
 
   let health: { status?: string };
@@ -83,8 +98,14 @@ export async function inspectContainer(hostId: MetaMcpHostId) {
   };
 
   const [image, restartPolicy] = await Promise.all([
-    runRemoteCommand(hostId, `docker inspect --format '{{.Config.Image}}' ${host.container}`),
-    runRemoteCommand(hostId, `docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' ${host.container}`),
+    runRemoteCommand(
+      hostId,
+      `docker inspect --format '{{.Config.Image}}' ${host.container}`,
+    ),
+    runRemoteCommand(
+      hostId,
+      `docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' ${host.container}`,
+    ),
   ]);
 
   return {
@@ -108,17 +129,28 @@ export async function inspectContainer(hostId: MetaMcpHostId) {
   };
 }
 
-export async function getContainerLogs(hostId: MetaMcpHostId, lines = DEFAULT_LOG_LINES) {
+export async function getContainerLogs(
+  hostId: MetaMcpHostId,
+  lines = DEFAULT_LOG_LINES,
+) {
   const boundedLines = Math.min(Math.max(Math.trunc(lines), 1), MAX_LOG_LINES);
   const host = getHost(hostId);
   const output = await runRemoteCommand(
     hostId,
     `docker logs --timestamps --tail ${boundedLines} ${host.container} 2>&1`,
   );
-  return { host: hostId, container: host.container, lines: boundedLines, logs: output };
+  return {
+    host: hostId,
+    container: host.container,
+    lines: boundedLines,
+    logs: output,
+  };
 }
 
-export async function performContainerAction(hostId: MetaMcpHostId, action: ContainerAction) {
+export async function performContainerAction(
+  hostId: MetaMcpHostId,
+  action: ContainerAction,
+) {
   const host = getHost(hostId);
   await runRemoteCommand(
     hostId,

@@ -25,62 +25,104 @@ function createMetaMcpOpsServer() {
   server.registerTool(
     "metamcp_ops_list_hosts",
     {
-      description: "List the fixed MetaMCP hosts managed by this control plane.",
+      description:
+        "List the fixed MetaMCP hosts managed by this control plane.",
       inputSchema: {},
     },
     async () => ({
-      content: [{
-        type: "text",
-        text: JSON.stringify(Object.entries(METAMCP_HOSTS).map(([id, host]) => ({
-          id,
-          label: host.label,
-          url: host.url,
-          container: host.container,
-          composeProject: host.composeProject,
-          composeService: host.composeService,
-        })), null, 2),
-      }],
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            Object.entries(METAMCP_HOSTS).map(([id, host]) => ({
+              id,
+              label: host.label,
+              url: host.url,
+              container: host.container,
+              composeProject: host.composeProject,
+              composeService: host.composeService,
+            })),
+            null,
+            2,
+          ),
+        },
+      ],
     }),
   );
 
   server.registerTool(
     "metamcp_ops_get_host_status",
     {
-      description: "Check public health and Docker container state for one or all managed MetaMCP hosts.",
-      inputSchema: { host: HOST_SCHEMA.optional().describe("Managed host. Omit to inspect all hosts.") },
+      description:
+        "Check public health and Docker container state for one or all managed MetaMCP hosts.",
+      inputSchema: {
+        host: HOST_SCHEMA.optional().describe(
+          "Managed host. Omit to inspect all hosts.",
+        ),
+      },
     },
     async ({ host }) => {
-      const hostIds = host ? [host] : Object.keys(METAMCP_HOSTS) as MetaMcpHostId[];
-      const results = await Promise.all(hostIds.map(async (hostId) => {
-        const [health, container] = await Promise.allSettled([
-          checkHostHealth(hostId),
-          inspectContainer(hostId),
-        ]);
-        return {
-          host: hostId,
-          health: health.status === "fulfilled"
-            ? health.value
-            : { error: health.reason instanceof Error ? health.reason.message : String(health.reason) },
-          container: container.status === "fulfilled"
-            ? container.value
-            : { error: container.reason instanceof Error ? container.reason.message : String(container.reason) },
-        };
-      }));
-      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+      const hostIds = host
+        ? [host]
+        : (Object.keys(METAMCP_HOSTS) as MetaMcpHostId[]);
+      const results = await Promise.all(
+        hostIds.map(async (hostId) => {
+          const [health, container] = await Promise.allSettled([
+            checkHostHealth(hostId),
+            inspectContainer(hostId),
+          ]);
+          return {
+            host: hostId,
+            health:
+              health.status === "fulfilled"
+                ? health.value
+                : {
+                    error:
+                      health.reason instanceof Error
+                        ? health.reason.message
+                        : String(health.reason),
+                  },
+            container:
+              container.status === "fulfilled"
+                ? container.value
+                : {
+                    error:
+                      container.reason instanceof Error
+                        ? container.reason.message
+                        : String(container.reason),
+                  },
+          };
+        }),
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+      };
     },
   );
 
   server.registerTool(
     "metamcp_ops_get_container_logs",
     {
-      description: "Read recent logs from the fixed MetaMCP application container on one managed host. Maximum 500 lines.",
+      description:
+        "Read recent logs from the fixed MetaMCP application container on one managed host. Maximum 500 lines.",
       inputSchema: {
         host: HOST_SCHEMA,
-        lines: z.number().int().min(1).max(500).optional().describe("Number of log lines, 1-500; defaults to 100."),
+        lines: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe("Number of log lines, 1-500; defaults to 100."),
       },
     },
     async ({ host, lines }) => ({
-      content: [{ type: "text", text: JSON.stringify(await getContainerLogs(host, lines), null, 2) }],
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(await getContainerLogs(host, lines), null, 2),
+        },
+      ],
     }),
   );
 
@@ -96,13 +138,21 @@ function createMetaMcpOpsServer() {
     },
     async ({ host, action, confirm }) => {
       if (confirm !== CONFIRMATION_PHRASE) {
-        throw new Error(`Container action not performed. Set confirm to ${CONFIRMATION_PHRASE}.`);
+        throw new Error(
+          `Container action not performed. Set confirm to ${CONFIRMATION_PHRASE}.`,
+        );
       }
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(await performContainerAction(host, action), null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              await performContainerAction(host, action),
+              null,
+              2,
+            ),
+          },
+        ],
       };
     },
   );
@@ -118,13 +168,17 @@ function createMetaMcpOpsServer() {
     },
     async ({ host, confirm }) => {
       if (confirm !== CONFIRMATION_PHRASE) {
-        throw new Error(`Compose reload not performed. Set confirm to ${CONFIRMATION_PHRASE}.`);
+        throw new Error(
+          `Compose reload not performed. Set confirm to ${CONFIRMATION_PHRASE}.`,
+        );
       }
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(await reloadComposeService(host), null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(await reloadComposeService(host), null, 2),
+          },
+        ],
       };
     },
   );
@@ -135,7 +189,9 @@ function createMetaMcpOpsServer() {
 function getConfiguredApiKey() {
   const apiKey = process.env.METAMCP_OPS_API_KEY;
   if (!apiKey) {
-    throw new Error("METAMCP_OPS_API_KEY must be configured before the MetaMCP operations server starts.");
+    throw new Error(
+      "METAMCP_OPS_API_KEY must be configured before the MetaMCP operations server starts.",
+    );
   }
   return apiKey;
 }
@@ -145,7 +201,9 @@ function isAuthorized(req: express.Request, expectedApiKey: string) {
     ? req.headers.authorization.slice("Bearer ".length)
     : undefined;
   const providedApiKey = req.headers["x-api-key"];
-  const candidate = bearerToken ?? (Array.isArray(providedApiKey) ? providedApiKey[0] : providedApiKey);
+  const candidate =
+    bearerToken ??
+    (Array.isArray(providedApiKey) ? providedApiKey[0] : providedApiKey);
   if (!candidate) {
     return false;
   }
@@ -163,7 +221,9 @@ export function createMetaMcpOpsRouter() {
   const servers = new Map<string, McpServer>();
   const apiKey = getConfiguredApiKey();
 
-  router.get("/health", (_req, res) => res.json({ status: "ok", service: "metamcp-ops" }));
+  router.get("/health", (_req, res) =>
+    res.json({ status: "ok", service: "metamcp-ops" }),
+  );
 
   router.use((req, res, next) => {
     if (!isAuthorized(req, apiKey)) {
@@ -177,7 +237,8 @@ export function createMetaMcpOpsRouter() {
   router.post("/mcp", async (req, res) => {
     try {
       const sessionId = req.headers["mcp-session-id"];
-      let transport = typeof sessionId === "string" ? transports.get(sessionId) : undefined;
+      let transport =
+        typeof sessionId === "string" ? transports.get(sessionId) : undefined;
 
       if (!transport) {
         if (sessionId) {
@@ -185,13 +246,14 @@ export function createMetaMcpOpsRouter() {
           return;
         }
         if (transports.size >= MAX_SESSIONS) {
-          res.status(503).json({ error: "MetaMCP operations session limit reached" });
+          res
+            .status(503)
+            .json({ error: "MetaMCP operations session limit reached" });
           return;
         }
 
         const server = createMetaMcpOpsServer();
-        let sessionTransport: StreamableHTTPServerTransport;
-        sessionTransport = new StreamableHTTPServerTransport({
+        const sessionTransport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (newSessionId) => {
             transports.set(newSessionId, sessionTransport);
@@ -219,7 +281,8 @@ export function createMetaMcpOpsRouter() {
 
   router.get("/mcp", async (req, res) => {
     const sessionId = req.headers["mcp-session-id"];
-    const transport = typeof sessionId === "string" ? transports.get(sessionId) : undefined;
+    const transport =
+      typeof sessionId === "string" ? transports.get(sessionId) : undefined;
     if (!transport) {
       res.status(404).json({ error: "MCP session not found" });
       return;
@@ -229,7 +292,8 @@ export function createMetaMcpOpsRouter() {
 
   router.delete("/mcp", async (req, res) => {
     const sessionId = req.headers["mcp-session-id"];
-    const transport = typeof sessionId === "string" ? transports.get(sessionId) : undefined;
+    const transport =
+      typeof sessionId === "string" ? transports.get(sessionId) : undefined;
     if (!transport) {
       res.status(404).json({ error: "MCP session not found" });
       return;

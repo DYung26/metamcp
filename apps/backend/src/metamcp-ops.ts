@@ -14,11 +14,13 @@ app.use(express.json({ limit: "1mb" }));
 app.use(createMetaMcpOpsRouter());
 
 const server = app.listen(port, "127.0.0.1", () => {
-  process.stdout.write(`MetaMCP operations MCP listening on 127.0.0.1:${port}\n`);
+  process.stdout.write(
+    `MetaMCP operations MCP listening on 127.0.0.1:${port}\n`,
+  );
 });
 
 function shutdown() {
-  server.close(() => process.exit(0));
+  server.close();
 }
 
 process.on("SIGTERM", shutdown);

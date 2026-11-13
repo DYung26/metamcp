@@ -3,6 +3,8 @@
   "ui": "tui",
   "globalEnv": [
     "PORT",
+    "METAMCP_OPS_API_KEY",
+    "METAMCP_OPS_PORT",
     "APP_URL",
     "DATABASE_URL",
     "BETTER_AUTH_SECRET",
