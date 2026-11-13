@@ -9,7 +9,7 @@ Run it as a host-level process on the VPS, not inside the MetaMCP application co
 - `METAMCP_OPS_API_KEY`: required bearer token. Keep it in a service-user-readable environment file, never in source control.
 - `METAMCP_OPS_PORT`: optional listener port; defaults to `12010`. The process binds to loopback.
 
-Expose the service through the VPS Cloudflare Tunnel using a dedicated hostname and keep the origin bound to loopback. Configure the MetaMCP upstream with `Authorization: Bearer <METAMCP_OPS_API_KEY>`.
+Expose the service through the existing VPS Cloudflare Tunnel at `https://vps-mcp.dyung.me/metamcp-ops`, routing that path to the loopback listener. Configure the MetaMCP upstream URL as `https://vps-mcp.dyung.me/metamcp-ops/mcp` with `Authorization: Bearer <METAMCP_OPS_API_KEY>`.
 
 ## Tools
 

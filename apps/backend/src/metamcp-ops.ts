@@ -11,7 +11,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
-app.use(createMetaMcpOpsRouter());
+app.use("/metamcp-ops", createMetaMcpOpsRouter());
 
 const server = app.listen(port, "127.0.0.1", () => {
   process.stdout.write(
