@@ -1,17 +1,34 @@
 # MetaMCP Operations MCP
 
-This service exposes a separate infrastructure-control MCP endpoint for the three fixed MetaMCP installations: `vps`, `arch`, and `omarchy`.
+This service exposes infrastructure controls for the three fixed MetaMCP installations: `vps`, `arch`, and `omarchy`.
 
-Run it as a host-level process on the VPS, not inside the MetaMCP application container. The process uses the VPS Docker CLI for its local container and the VPS SSH configuration for the Arch and Omarchy containers. The SSH identity must be able to run Docker commands on those two hosts without an interactive prompt. The process uses `~/.config/metamcp-ops/known_hosts` with strict host-key checking, independently of the interactive SSH configuration.
+Run it as a host-level process on the VPS. It uses the VPS Docker CLI for the VPS container and SSH for the Arch and Omarchy containers. The SSH identity must be able to run Docker commands on those hosts without an interactive prompt. SSH host keys are checked against `~/.config/metamcp-ops/known_hosts`.
+
+## Access
+
+The service has one MCP endpoint and two ways to reach it:
+
+- **From the VPS MetaMCP instance:** register `http://localhost:12010/metamcp-ops/mcp` in the `unified` namespace. The MetaMCP backend has `TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL=true`, so it rewrites `localhost` to `host.docker.internal`. Docker Compose maps that hostname to the VPS host gateway. Bind the service to that gateway IP; on the VPS this is the `docker0` address `172.17.0.1`. The trusted MetaMCP app container IP is allowed without a bearer token.
+- **From a client connecting directly:** use `https://vps-mcp.dyung.me/metamcp-ops/mcp` with `Authorization: Bearer <METAMCP_OPS_API_KEY>`.
+
+These are two routes to the same service, not two MCP servers. Only the internal URL needs to be registered in the VPS `unified` namespace. Agents connecting to the `unified` endpoint do not use the external URL.
+
+The API key is stored on the VPS in `/home/dyung/.config/metamcp-ops/env` as `METAMCP_OPS_API_KEY`. The file is restricted to the service user. The key is required for direct/external access; requests from the configured trusted container IP do not need it.
+
+## MetaMCP administration
+
+MetaMCP's built-in admin tools are separate from this infrastructure service. When an endpoint has `enable_metamcp_admin_tools=true` and API-key or OAuth authentication enabled, MetaMCP injects its admin tools into that endpoint's tool list under the `metamcp-admin__` prefix.
+
+Those tools cover MCP server CRUD and bulk import; namespace CRUD, server membership, server/tool status and tool overrides; endpoint CRUD; API-key management; tool lookup and sync; OAuth sessions; configuration; and logs. They are not a separately registered upstream server. They are available on the authenticated endpoint itself and operate on the MetaMCP instance serving that endpoint.
+
+The `metamcp-ops` server below is for infrastructure operations across the three hosts. It does not provide MetaMCP database CRUD for the Arch or Omarchy instances. Those instances need their own admin-tools support and endpoint configuration before their MetaMCP records can be managed remotely.
 
 ## Configuration
 
-- `METAMCP_OPS_API_KEY`: required bearer token. Keep it in a service-user-readable environment file, never in source control.
+- `METAMCP_OPS_API_KEY`: required bearer token for direct/external requests. Keep it in a service-user-readable environment file, never in source control.
 - `METAMCP_OPS_PORT`: optional listener port; defaults to `12010`.
-- `METAMCP_OPS_HOST`: optional bind IP; defaults to `127.0.0.1`.
-- `METAMCP_OPS_TRUSTED_IPS`: optional comma-separated client IP allowlist. Requests from these exact IPs may use the MCP endpoint without a bearer token; all other clients still require `METAMCP_OPS_API_KEY`.
-
-For external access, expose the service through the existing VPS Cloudflare Tunnel at `https://vps-mcp.dyung.me/metamcp-ops` and keep bearer authentication enabled. For the unified MetaMCP namespace on the same VPS, prefer the private Docker bridge address `http://host.docker.internal:12010` and trust only the MetaMCP app container IP. Configure an external MetaMCP upstream as `https://vps-mcp.dyung.me/metamcp-ops/mcp` with `Authorization: Bearer <METAMCP_OPS_API_KEY>`. For the unified namespace running inside the VPS MetaMCP container, use `http://host.docker.internal:12010/metamcp-ops/mcp` without a bearer header; the service checks the caller's exact container IP.
+- `METAMCP_OPS_HOST`: optional bind IP; defaults to `127.0.0.1`. For the VPS MetaMCP container, bind to the current Docker host-gateway address.
+- `METAMCP_OPS_TRUSTED_IPS`: optional comma-separated client IP allowlist. Requests from these exact IPs may use the MCP endpoint without a bearer token; all other clients require `METAMCP_OPS_API_KEY`.
 
 ## Tools
 
