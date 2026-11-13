@@ -7,9 +7,11 @@ Run it as a host-level process on the VPS, not inside the MetaMCP application co
 ## Configuration
 
 - `METAMCP_OPS_API_KEY`: required bearer token. Keep it in a service-user-readable environment file, never in source control.
-- `METAMCP_OPS_PORT`: optional listener port; defaults to `12010`. The process binds to loopback.
+- `METAMCP_OPS_PORT`: optional listener port; defaults to `12010`.
+- `METAMCP_OPS_HOST`: optional bind IP; defaults to `127.0.0.1`.
+- `METAMCP_OPS_TRUSTED_IPS`: optional comma-separated client IP allowlist. Requests from these exact IPs may use the MCP endpoint without a bearer token; all other clients still require `METAMCP_OPS_API_KEY`.
 
-Expose the service through the existing VPS Cloudflare Tunnel at `https://vps-mcp.dyung.me/metamcp-ops`, routing that path to the loopback listener. Configure the MetaMCP upstream URL as `https://vps-mcp.dyung.me/metamcp-ops/mcp` with `Authorization: Bearer <METAMCP_OPS_API_KEY>`.
+For external access, expose the service through the existing VPS Cloudflare Tunnel at `https://vps-mcp.dyung.me/metamcp-ops` and keep bearer authentication enabled. For the unified MetaMCP namespace on the same VPS, prefer the private Docker bridge address `http://host.docker.internal:12010` and trust only the MetaMCP app container IP. Configure an external MetaMCP upstream as `https://vps-mcp.dyung.me/metamcp-ops/mcp` with `Authorization: Bearer <METAMCP_OPS_API_KEY>`. For the unified namespace running inside the VPS MetaMCP container, use `http://host.docker.internal:12010/metamcp-ops/mcp` without a bearer header; the service checks the caller's exact container IP.
 
 ## Tools
 
