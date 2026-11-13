@@ -2,7 +2,7 @@
 
 This service exposes a separate infrastructure-control MCP endpoint for the three fixed MetaMCP installations: `vps`, `arch`, and `omarchy`.
 
-Run it as a host-level process on the VPS, not inside the MetaMCP application container. The process uses the VPS Docker CLI for its local container and the VPS SSH configuration for the Arch and Omarchy containers. The SSH identity must be able to run Docker commands on those two hosts without an interactive prompt.
+Run it as a host-level process on the VPS, not inside the MetaMCP application container. The process uses the VPS Docker CLI for its local container and the VPS SSH configuration for the Arch and Omarchy containers. The SSH identity must be able to run Docker commands on those two hosts without an interactive prompt. The process uses `~/.config/metamcp-ops/known_hosts` with strict host-key checking, independently of the interactive SSH configuration.
 
 ## Configuration
 

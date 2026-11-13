@@ -1,8 +1,12 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import { execa } from "execa";
 
 import { METAMCP_HOSTS, type ContainerAction, type MetaMcpHostId } from "./hosts";
 
 const SSH_CONNECT_TIMEOUT_SECONDS = 8;
+const SSH_KNOWN_HOSTS_FILE = join(homedir(), ".config", "metamcp-ops", "known_hosts");
 const SSH_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_LOG_LINES = 500;
 const DEFAULT_LOG_LINES = 100;
@@ -23,6 +27,7 @@ async function runRemoteCommand(
       "-o", "BatchMode=yes",
       "-o", `ConnectTimeout=${SSH_CONNECT_TIMEOUT_SECONDS}`,
       "-o", "StrictHostKeyChecking=yes",
+      "-o", `UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}`,
       host.hostname,
       command,
     ],
