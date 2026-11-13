@@ -21,9 +21,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use("/metamcp-ops", createMetaMcpOpsRouter());
 
 const server = app.listen(port, host, () => {
-  process.stdout.write(
-    `MetaMCP operations MCP listening on ${host}:${port}\n`,
-  );
+  process.stdout.write(`MetaMCP operations MCP listening on ${host}:${port}\n`);
 });
 
 function shutdown() {

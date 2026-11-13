@@ -60,13 +60,20 @@ describe("MetaMCP operations MCP", () => {
     app.use(express.json());
     app.use(createMetaMcpOpsRouter());
     const { server, baseUrl } = await startServer(app);
-    const client = new Client({ name: "metamcp-ops-internal-test", version: "1.0.0" });
-    const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`));
+    const client = new Client({
+      name: "metamcp-ops-internal-test",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`${baseUrl}/mcp`),
+    );
 
     try {
       await client.connect(transport);
       const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toContain("metamcp_ops_get_host_status");
+      expect(tools.tools.map((tool) => tool.name)).toContain(
+        "metamcp_ops_get_host_status",
+      );
     } finally {
       await client.close();
       await new Promise<void>((resolve, reject) => {
