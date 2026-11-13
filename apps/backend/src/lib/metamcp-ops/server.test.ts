@@ -35,6 +35,7 @@ describe("MetaMCP operations MCP", () => {
 
   it("keeps health public and rejects unauthenticated MCP requests", async () => {
     vi.stubEnv("METAMCP_OPS_API_KEY", TEST_API_KEY);
+    vi.stubEnv("METAMCP_OPS_TRUSTED_IPS", "192.0.2.10");
     const app = express();
     app.use(express.json());
     app.use(createMetaMcpOpsRouter());
@@ -51,6 +52,36 @@ describe("MetaMCP operations MCP", () => {
       });
     }
   });
+
+  it("allows the trusted MetaMCP container IP without a bearer token", async () => {
+    vi.stubEnv("METAMCP_OPS_API_KEY", TEST_API_KEY);
+    vi.stubEnv("METAMCP_OPS_TRUSTED_IPS", "127.0.0.1");
+    const app = express();
+    app.use(express.json());
+    app.use(createMetaMcpOpsRouter());
+    const { server, baseUrl } = await startServer(app);
+    const client = new Client({
+      name: "metamcp-ops-internal-test",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`${baseUrl}/mcp`),
+    );
+
+    try {
+      await client.connect(transport);
+      const tools = await client.listTools();
+      expect(tools.tools.map((tool) => tool.name)).toContain(
+        "metamcp_ops_get_host_status",
+      );
+    } finally {
+      await client.close();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("advertises the management tools and enforces action confirmation over MCP", async () => {
     vi.stubEnv("METAMCP_OPS_API_KEY", TEST_API_KEY);
     const app = express();

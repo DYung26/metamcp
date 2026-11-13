@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -196,7 +197,33 @@ function getConfiguredApiKey() {
   return apiKey;
 }
 
-function isAuthorized(req: express.Request, expectedApiKey: string) {
+function getTrustedClientIps() {
+  const configuredIps = process.env.METAMCP_OPS_TRUSTED_IPS ?? "";
+  return new Set(
+    configuredIps
+      .split(",")
+      .map((ip) => ip.trim())
+      .filter((ip) => isIP(ip) !== 0),
+  );
+}
+
+function normalizeRemoteAddress(address: string | undefined) {
+  if (!address) {
+    return undefined;
+  }
+  return address.startsWith("::ffff:") ? address.slice(7) : address;
+}
+
+function isAuthorized(
+  req: express.Request,
+  expectedApiKey: string,
+  trustedClientIps: Set<string>,
+) {
+  const remoteAddress = normalizeRemoteAddress(req.socket.remoteAddress);
+  if (remoteAddress && trustedClientIps.has(remoteAddress)) {
+    return true;
+  }
+
   const bearerToken = req.headers.authorization?.startsWith("Bearer ")
     ? req.headers.authorization.slice("Bearer ".length)
     : undefined;
@@ -220,13 +247,14 @@ export function createMetaMcpOpsRouter() {
   const transports = new Map<string, StreamableHTTPServerTransport>();
   const servers = new Map<string, McpServer>();
   const apiKey = getConfiguredApiKey();
+  const trustedClientIps = getTrustedClientIps();
 
   router.get("/health", (_req, res) =>
     res.json({ status: "ok", service: "metamcp-ops" }),
   );
 
   router.use((req, res, next) => {
-    if (!isAuthorized(req, apiKey)) {
+    if (!isAuthorized(req, apiKey, trustedClientIps)) {
       res.setHeader("WWW-Authenticate", "Bearer");
       res.status(401).json({ error: "Unauthorized" });
       return;
