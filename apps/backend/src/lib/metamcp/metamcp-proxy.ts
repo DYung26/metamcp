@@ -68,7 +68,7 @@ import {
 import { isRecoverableBackendError } from "./session-error";
 import { prioritizeAdminTools } from "./tool-list-prioritization";
 import { parseToolName } from "./tool-name-parser";
-import { isToolInPartition } from "./tool-partition";
+import { isToolAllowedInPartition, isToolInPartition } from "./tool-partition";
 import { toolsSyncCache } from "./tools-sync-cache";
 import { sanitizeName } from "./utils";
 
@@ -773,7 +773,11 @@ export const createServer = async (
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (
       handlerContext.toolPartition &&
-      !isToolInPartition(request.params.name, handlerContext.toolPartition)
+      !isToolAllowedInPartition(
+        request.params.name,
+        handlerContext.toolPartition,
+        isExposedAdminToolName(request.params.name),
+      )
     ) {
       throw new Error(
         `Tool ${request.params.name} is not available in partition ${handlerContext.toolPartition.index + 1}/${handlerContext.toolPartition.total}.`,
