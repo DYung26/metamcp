@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { isToolInPartition, parseToolPartition } from "./tool-partition";
+import {
+  isToolAllowedInPartition,
+  isToolInPartition,
+  parseToolPartition,
+} from "./tool-partition";
 
 describe("isToolInPartition", () => {
   it("assigns every tool to exactly one partition", () => {
@@ -46,6 +50,31 @@ describe("isToolInPartition", () => {
     expect(isToolInPartition("server__tool_a", partition)).toBe(
       isToolInPartition("server__tool_a", partition),
     );
+  });
+});
+
+
+describe("isToolAllowedInPartition", () => {
+  it("allows globally exposed admin tools in every partition", () => {
+    const adminTool = "metamcp-admin__metamcp_list_mcp_servers";
+    for (const index of [0, 1, 2]) {
+      expect(
+        isToolAllowedInPartition(adminTool, { index, total: 3 }, true),
+      ).toBe(true);
+    }
+  });
+
+  it("keeps namespace tools restricted to their assigned partition", () => {
+    const tool = "shell__shell_exec";
+    const assigned = [0, 1, 2].filter((index) =>
+      isToolInPartition(tool, { index, total: 3 }),
+    );
+    expect(assigned).toHaveLength(1);
+    for (const index of [0, 1, 2]) {
+      expect(
+        isToolAllowedInPartition(tool, { index, total: 3 }),
+      ).toBe(index === assigned[0]);
+    }
   });
 });
 
