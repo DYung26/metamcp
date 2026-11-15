@@ -18,6 +18,15 @@ export function isToolInPartition(
   return digest.readUInt32BE(0) % partition.total === partition.index;
 }
 
+/** Admin tools are exposed in every partition and must remain callable there. */
+export function isToolAllowedInPartition(
+  toolName: string,
+  partition: ToolPartition,
+  globallyAvailable = false,
+): boolean {
+  return globallyAvailable || isToolInPartition(toolName, partition);
+}
+
 export type ToolPartitionParseResult =
   | { partition: undefined; error?: never }
   | { partition: ToolPartition; error?: never }
