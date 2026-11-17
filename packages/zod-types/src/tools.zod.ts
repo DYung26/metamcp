@@ -11,6 +11,7 @@ export const ToolSchema = z.object({
   title: z.string().nullable().optional(),
   description: z.string().nullable(),
   annotations: z.record(z.string(), z.unknown()).nullable().optional(),
+  _meta: z.record(z.string(), z.unknown()).nullable().optional(),
   toolSchema: z
     .object({
       type: z.literal("object"),
@@ -44,6 +45,7 @@ export const CreateToolRequestSchema = z.object({
       name: z.string(),
       description: z.string().optional(),
       annotations: z.record(z.string(), z.unknown()).optional(),
+      _meta: z.record(z.string(), z.unknown()).optional(),
       inputSchema: z
         .object({
           type: z.literal("object").optional(),
@@ -78,6 +80,7 @@ export const ToolCreateInputSchema = z.object({
   name: z.string(),
   description: z.string().nullable().optional(),
   annotations: z.record(z.string(), z.unknown()).nullable().optional(),
+  _meta: z.record(z.string(), z.unknown()).nullable().optional(),
   toolSchema: z
     .object({
       type: z.literal("object"),
@@ -94,6 +97,7 @@ export const ToolUpsertInputSchema = z.object({
       name: z.string(),
       description: z.string().nullable().optional(),
       annotations: z.record(z.string(), z.unknown()).optional(),
+      _meta: z.record(z.string(), z.unknown()).optional(),
       inputSchema: z
         .object({
           type: z.literal("object").optional(),
@@ -117,6 +121,7 @@ export const DatabaseToolSchema = z.object({
   title: z.string().nullable().optional(),
   description: z.string().nullable(),
   annotations: z.record(z.string(), z.unknown()).nullable().optional(),
+  _meta: z.record(z.string(), z.unknown()).nullable().optional(),
   toolSchema: z
     .object({
       type: z.literal("object"),

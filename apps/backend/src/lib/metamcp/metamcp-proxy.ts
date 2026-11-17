@@ -261,6 +261,7 @@ export const createServer = async (
             name: toolsTable.name,
             description: toolsTable.description,
             annotations: toolsTable.annotations,
+            _meta: toolsTable._meta,
             toolSchema: toolsTable.toolSchema,
             mcpServerUuid: toolsTable.mcp_server_uuid,
           })
@@ -280,6 +281,7 @@ export const createServer = async (
         name: toolName,
         description: stored.description || "",
         annotations: stored.annotations ?? undefined,
+        _meta: stored._meta ?? undefined,
         inputSchema: stored.toolSchema,
       } as Tool;
     });

@@ -33,6 +33,7 @@ export class ToolsRepository {
       name: tool.name,
       description: tool.description || "",
       annotations: tool.annotations ?? null,
+      _meta: tool._meta ?? null,
       toolSchema: {
         type: "object" as const,
         ...tool.inputSchema,
@@ -49,6 +50,7 @@ export class ToolsRepository {
         set: {
           description: sql`excluded.description`,
           annotations: sql`excluded.annotations`,
+          _meta: sql`excluded._meta`,
           toolSchema: sql`excluded.tool_schema`,
           updated_at: new Date(),
         },

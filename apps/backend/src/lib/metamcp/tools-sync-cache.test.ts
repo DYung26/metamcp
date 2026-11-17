@@ -27,6 +27,20 @@ describe("ToolsSyncCache", () => {
       expect(hash1).toBe(hash2);
     });
 
+    it("should include MCP Apps metadata in the tool hash", () => {
+      const tool = {
+        name: "skill_config",
+        inputSchema: { type: "object" },
+        _meta: { ui: { resourceUri: "ui://skilljack/configuration.html" } },
+      };
+      const changedTool = {
+        ...tool,
+        _meta: { ui: { resourceUri: "ui://skilljack/updated.html" } },
+      };
+
+      expect(cache.hashTools([tool])).not.toBe(cache.hashTools([changedTool]));
+    });
+
     it("should generate different hash for different tools", () => {
       const tools1 = ["tool1", "tool2"];
       const tools2 = ["tool1", "tool3"];

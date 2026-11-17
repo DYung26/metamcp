@@ -148,6 +148,13 @@
       "when": 1794430945927,
       "tag": "0020_namespace_tool_partition_count",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794891140688,
+      "tag": "0021_mcp_apps_tool_metadata",
+      "breakpoints": true
     }
   ]
 }

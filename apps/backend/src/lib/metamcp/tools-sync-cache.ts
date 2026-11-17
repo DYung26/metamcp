@@ -9,6 +9,7 @@ type SyncableTool = {
   description?: string | null;
   inputSchema?: unknown;
   annotations?: Record<string, unknown> | null;
+  _meta?: Record<string, unknown> | null;
 };
 
 export class ToolsSyncCache {
@@ -24,12 +25,14 @@ export class ToolsSyncCache {
               description: "",
               inputSchema: null,
               annotations: null,
+              _meta: null,
             }
           : {
               name: tool.name,
               description: tool.description ?? "",
               inputSchema: tool.inputSchema ?? null,
               annotations: tool.annotations ?? null,
+              _meta: tool._meta ?? null,
             },
       )
       .sort((a, b) => a.name.localeCompare(b.name));
