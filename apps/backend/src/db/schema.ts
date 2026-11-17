@@ -142,6 +142,7 @@ export const toolsTable = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     annotations: jsonb("annotations").$type<Record<string, unknown> | null>(),
+    _meta: jsonb("_meta").$type<Record<string, unknown> | null>(),
     toolSchema: jsonb("tool_schema")
       .$type<{
         type: "object";
