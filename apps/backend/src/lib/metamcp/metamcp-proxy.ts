@@ -48,6 +48,7 @@ import { createConcurrencyLimiter } from "./discovery-concurrency";
 import { getMcpServers } from "./fetch-metamcp";
 import { extractForwardedHeaders, mergeHeaders } from "./header-forwarding";
 import { requestWithSessionRecovery } from "./list-handler-recovery";
+import { getToolUiResourceUris } from "./resource-uri";
 import { mcpServerPool } from "./mcp-server-pool";
 import { createAuditCallToolMiddleware } from "./metamcp-middleware/audit-requests.functional";
 import {
@@ -187,6 +188,7 @@ export const createServer = async (
   const toolToServerUuid: Record<string, string> = {};
   const promptToClient: Record<string, ConnectedClient> = {};
   const resourceToClient: Record<string, ConnectedClient> = {};
+  const resourceToServerUuid: Record<string, string> = {};
 
   // Helper function to detect if a server is the same instance
   const isSameServerInstance = (
@@ -277,6 +279,14 @@ export const createServer = async (
     const allTools: Tool[] = persistedTools.map((stored) => {
       const toolName = `${serverNameByUuid.get(stored.mcpServerUuid) || stored.mcpServerUuid}__${stored.name}`;
       toolToServerUuid[toolName] = stored.mcpServerUuid;
+      if (
+        !handlerContext.toolPartition ||
+        isToolInPartition(toolName, handlerContext.toolPartition)
+      ) {
+        for (const uri of getToolUiResourceUris(stored._meta)) {
+          resourceToServerUuid[uri] = stored.mcpServerUuid;
+        }
+      }
       return {
         name: toolName,
         description: stored.description || "",
@@ -337,6 +347,13 @@ export const createServer = async (
                   discovered.push(...(result.tools || []));
                   cursor = result.nextCursor;
                 } while (cursor);
+                for (const discoveredTool of discovered) {
+                  for (const uri of getToolUiResourceUris(
+                    discoveredTool._meta,
+                  )) {
+                    resourceToServerUuid[uri] = serverUuid;
+                  }
+                }
                 if (toolsSyncCache.hasChanged(serverUuid, discovered)) {
                   const toolsToSave = await filterOutOverrideTools(
                     discovered,
@@ -1113,6 +1130,7 @@ export const createServer = async (
           if (result.resources) {
             const resourcesWithSource = result.resources.map((resource) => {
               resourceToClient[resource.uri] = activeSession;
+              resourceToServerUuid[resource.uri] = uuid;
               return {
                 ...resource,
                 name: resource.name || "",
@@ -1142,30 +1160,89 @@ export const createServer = async (
   // Read Resource Handler
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
-    const clientForResource = resourceToClient[uri];
+    let activeSession: ConnectedClient | undefined = resourceToClient[uri];
+    const serverUuid = resourceToServerUuid[uri];
 
-    if (!clientForResource) {
+    if (!serverUuid) {
       throw new Error(`Unknown resource: ${uri}`);
     }
 
+    // MCP Apps hosts read the ui:// URI referenced by tools/list directly;
+    // they are not required to call resources/list first. Resolve the owning
+    // backend from the tool metadata and open its session on demand.
+    const serverParams = await getMcpServers(
+      namespaceUuid,
+      includeInactiveServers,
+    );
+    const params = serverParams[serverUuid];
+    if (!params) {
+      throw new Error(`Unknown resource: ${uri}`);
+    }
+    const forwardedHeadersByServer = handlerContext.clientRequestHeaders
+      ? extractForwardedHeaders(
+          handlerContext.clientRequestHeaders,
+          serverParams,
+        )
+      : {};
+    const effectiveParams = forwardedHeadersByServer[serverUuid]
+      ? {
+          ...params,
+          headers: mergeHeaders(
+            params.headers,
+            forwardedHeadersByServer[serverUuid],
+          ),
+        }
+      : params;
+
+    if (!activeSession) {
+      activeSession = await mcpServerPool.getSession(
+        sessionId,
+        serverUuid,
+        effectiveParams,
+        namespaceUuid,
+      );
+    }
+    if (!activeSession) {
+      throw new Error(
+        `Unable to connect to resource server: ${params.name || serverUuid}`,
+      );
+    }
+
+    const sessionForRead = activeSession;
+    const serverName =
+      params.name ||
+      sessionForRead.client.getServerVersion()?.name ||
+      serverUuid;
+
     try {
-      return await clientForResource.client.request(
-        {
-          method: "resources/read",
-          params: {
-            uri,
-            _meta: request.params._meta,
-          },
+      const result = await requestWithSessionRecovery({
+        pool: mcpServerPool,
+        sessionId,
+        serverUuid,
+        params: effectiveParams,
+        namespaceUuid,
+        operation: "resources/read",
+        serverName,
+        session: sessionForRead,
+        attempt: (active) =>
+          active.client.request(
+            {
+              method: "resources/read",
+              params: {
+                uri,
+                _meta: request.params._meta,
+              },
+            },
+            ReadResourceResultSchema,
+          ),
+        onFreshSession: (fresh) => {
+          activeSession = fresh;
         },
-        ReadResourceResultSchema,
-      );
+      });
+      resourceToClient[uri] = activeSession ?? sessionForRead;
+      return result;
     } catch (error) {
-      logger.error(
-        `Error reading resource through ${
-          clientForResource.client.getServerVersion()?.name
-        }:`,
-        error,
-      );
+      logger.error(`Error reading resource through ${serverName}:`, error);
       throw error;
     }
   });
