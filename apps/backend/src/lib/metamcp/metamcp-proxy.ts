@@ -65,6 +65,10 @@ import {
   createToolOverridesCallToolMiddleware,
   createToolOverridesListToolsMiddleware,
 } from "./metamcp-middleware/tool-overrides.functional";
+import {
+  getToolUiResourceServerUuids,
+  getToolUiResourceUris,
+} from "./resource-uri";
 import { isRecoverableBackendError } from "./session-error";
 import { prioritizeAdminTools } from "./tool-list-prioritization";
 import { parseToolName } from "./tool-name-parser";
@@ -187,6 +191,7 @@ export const createServer = async (
   const toolToServerUuid: Record<string, string> = {};
   const promptToClient: Record<string, ConnectedClient> = {};
   const resourceToClient: Record<string, ConnectedClient> = {};
+  const resourceToServerUuid: Record<string, string> = {};
 
   // Helper function to detect if a server is the same instance
   const isSameServerInstance = (
@@ -277,6 +282,14 @@ export const createServer = async (
     const allTools: Tool[] = persistedTools.map((stored) => {
       const toolName = `${serverNameByUuid.get(stored.mcpServerUuid) || stored.mcpServerUuid}__${stored.name}`;
       toolToServerUuid[toolName] = stored.mcpServerUuid;
+      if (
+        !handlerContext.toolPartition ||
+        isToolInPartition(toolName, handlerContext.toolPartition)
+      ) {
+        for (const uri of getToolUiResourceUris(stored._meta)) {
+          resourceToServerUuid[uri] = stored.mcpServerUuid;
+        }
+      }
       return {
         name: toolName,
         description: stored.description || "",
@@ -337,6 +350,13 @@ export const createServer = async (
                   discovered.push(...(result.tools || []));
                   cursor = result.nextCursor;
                 } while (cursor);
+                for (const discoveredTool of discovered) {
+                  for (const uri of getToolUiResourceUris(
+                    discoveredTool._meta,
+                  )) {
+                    resourceToServerUuid[uri] = serverUuid;
+                  }
+                }
                 if (toolsSyncCache.hasChanged(serverUuid, discovered)) {
                   const toolsToSave = await filterOutOverrideTools(
                     discovered,
@@ -1113,6 +1133,7 @@ export const createServer = async (
           if (result.resources) {
             const resourcesWithSource = result.resources.map((resource) => {
               resourceToClient[resource.uri] = activeSession;
+              resourceToServerUuid[resource.uri] = uuid;
               return {
                 ...resource,
                 name: resource.name || "",
@@ -1142,30 +1163,119 @@ export const createServer = async (
   // Read Resource Handler
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
-    const clientForResource = resourceToClient[uri];
+    let activeSession: ConnectedClient | undefined = resourceToClient[uri];
+    let serverUuid = resourceToServerUuid[uri];
+    const serverParams = await getMcpServers(
+      namespaceUuid,
+      includeInactiveServers,
+    );
 
-    if (!clientForResource) {
+    // Resource routing state is session-local; a host can read the UI resource
+    // on a different session from the one that originally listed the tool.
+    if (!serverUuid) {
+      const serverUuids = Object.keys(serverParams);
+      if (serverUuids.length > 0) {
+        const toolMetadata = await db
+          .select({
+            serverUuid: toolsTable.mcp_server_uuid,
+            meta: toolsTable._meta,
+          })
+          .from(toolsTable)
+          .where(inArray(toolsTable.mcp_server_uuid, serverUuids));
+        const matchingServerUuids = getToolUiResourceServerUuids(
+          uri,
+          toolMetadata,
+        );
+
+        if (matchingServerUuids.length > 1) {
+          throw new Error(`Ambiguous resource: ${uri}`);
+        }
+        serverUuid = matchingServerUuids[0];
+        if (serverUuid) {
+          resourceToServerUuid[uri] = serverUuid;
+          logger.info(
+            `Resolved resource ${uri} to backend ${serverUuid} from persisted tool metadata`,
+          );
+        }
+      }
+    }
+
+    if (!serverUuid) {
+      logger.warn(
+        `Unable to resolve resource ${uri} in namespace ${namespaceUuid}`,
+      );
       throw new Error(`Unknown resource: ${uri}`);
     }
 
+    const params = serverParams[serverUuid];
+    if (!params) {
+      throw new Error(`Unknown resource: ${uri}`);
+    }
+    const forwardedHeadersByServer = handlerContext.clientRequestHeaders
+      ? extractForwardedHeaders(
+          handlerContext.clientRequestHeaders,
+          serverParams,
+        )
+      : {};
+    const effectiveParams = forwardedHeadersByServer[serverUuid]
+      ? {
+          ...params,
+          headers: mergeHeaders(
+            params.headers,
+            forwardedHeadersByServer[serverUuid],
+          ),
+        }
+      : params;
+
+    if (!activeSession) {
+      activeSession = await mcpServerPool.getSession(
+        sessionId,
+        serverUuid,
+        effectiveParams,
+        namespaceUuid,
+      );
+    }
+    if (!activeSession) {
+      throw new Error(
+        `Unable to connect to resource server: ${params.name || serverUuid}`,
+      );
+    }
+
+    const sessionForRead = activeSession;
+    const serverName =
+      params.name ||
+      sessionForRead.client.getServerVersion()?.name ||
+      serverUuid;
+
     try {
-      return await clientForResource.client.request(
-        {
-          method: "resources/read",
-          params: {
-            uri,
-            _meta: request.params._meta,
-          },
+      const result = await requestWithSessionRecovery({
+        pool: mcpServerPool,
+        sessionId,
+        serverUuid,
+        params: effectiveParams,
+        namespaceUuid,
+        operation: "resources/read",
+        serverName,
+        session: sessionForRead,
+        attempt: (active) =>
+          active.client.request(
+            {
+              method: "resources/read",
+              params: {
+                uri,
+                _meta: request.params._meta,
+              },
+            },
+            ReadResourceResultSchema,
+          ),
+        onFreshSession: (fresh) => {
+          activeSession = fresh;
         },
-        ReadResourceResultSchema,
-      );
+      });
+      resourceToClient[uri] = activeSession ?? sessionForRead;
+      return result;
     } catch (error) {
-      logger.error(
-        `Error reading resource through ${
-          clientForResource.client.getServerVersion()?.name
-        }:`,
-        error,
-      );
+      logger.error(`Error reading resource through ${serverName}:`, error);
       throw error;
     }
   });
