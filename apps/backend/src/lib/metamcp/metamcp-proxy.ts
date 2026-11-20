@@ -48,7 +48,6 @@ import { createConcurrencyLimiter } from "./discovery-concurrency";
 import { getMcpServers } from "./fetch-metamcp";
 import { extractForwardedHeaders, mergeHeaders } from "./header-forwarding";
 import { requestWithSessionRecovery } from "./list-handler-recovery";
-import { getToolUiResourceUris } from "./resource-uri";
 import { mcpServerPool } from "./mcp-server-pool";
 import { createAuditCallToolMiddleware } from "./metamcp-middleware/audit-requests.functional";
 import {
@@ -66,6 +65,10 @@ import {
   createToolOverridesCallToolMiddleware,
   createToolOverridesListToolsMiddleware,
 } from "./metamcp-middleware/tool-overrides.functional";
+import {
+  getToolUiResourceServerUuids,
+  getToolUiResourceUris,
+} from "./resource-uri";
 import { isRecoverableBackendError } from "./session-error";
 import { prioritizeAdminTools } from "./tool-list-prioritization";
 import { parseToolName } from "./tool-name-parser";
@@ -1161,19 +1164,49 @@ export const createServer = async (
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
     let activeSession: ConnectedClient | undefined = resourceToClient[uri];
-    const serverUuid = resourceToServerUuid[uri];
-
-    if (!serverUuid) {
-      throw new Error(`Unknown resource: ${uri}`);
-    }
-
-    // MCP Apps hosts read the ui:// URI referenced by tools/list directly;
-    // they are not required to call resources/list first. Resolve the owning
-    // backend from the tool metadata and open its session on demand.
+    let serverUuid = resourceToServerUuid[uri];
     const serverParams = await getMcpServers(
       namespaceUuid,
       includeInactiveServers,
     );
+
+    // Resource routing state is session-local; a host can read the UI resource
+    // on a different session from the one that originally listed the tool.
+    if (!serverUuid) {
+      const serverUuids = Object.keys(serverParams);
+      if (serverUuids.length > 0) {
+        const toolMetadata = await db
+          .select({
+            serverUuid: toolsTable.mcp_server_uuid,
+            meta: toolsTable._meta,
+          })
+          .from(toolsTable)
+          .where(inArray(toolsTable.mcp_server_uuid, serverUuids));
+        const matchingServerUuids = getToolUiResourceServerUuids(
+          uri,
+          toolMetadata,
+        );
+
+        if (matchingServerUuids.length > 1) {
+          throw new Error(`Ambiguous resource: ${uri}`);
+        }
+        serverUuid = matchingServerUuids[0];
+        if (serverUuid) {
+          resourceToServerUuid[uri] = serverUuid;
+          logger.info(
+            `Resolved resource ${uri} to backend ${serverUuid} from persisted tool metadata`,
+          );
+        }
+      }
+    }
+
+    if (!serverUuid) {
+      logger.warn(
+        `Unable to resolve resource ${uri} in namespace ${namespaceUuid}`,
+      );
+      throw new Error(`Unknown resource: ${uri}`);
+    }
+
     const params = serverParams[serverUuid];
     if (!params) {
       throw new Error(`Unknown resource: ${uri}`);

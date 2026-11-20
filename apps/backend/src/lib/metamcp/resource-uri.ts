@@ -20,3 +20,16 @@ export function getToolUiResourceUris(metaValue: unknown): string[] {
       all.indexOf(uri) === index,
   );
 }
+
+export function getToolUiResourceServerUuids(
+  resourceUri: string,
+  tools: readonly { serverUuid: string; meta: unknown }[],
+): string[] {
+  return [
+    ...new Set(
+      tools
+        .filter(({ meta }) => getToolUiResourceUris(meta).includes(resourceUri))
+        .map(({ serverUuid }) => serverUuid),
+    ),
+  ];
+}
