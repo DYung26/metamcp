@@ -26,7 +26,8 @@ export interface RequestWithSessionRecoveryOptions<T> {
   pool: RecoverySessionPool;
   sessionId: string;
   serverUuid: string;
-  params: ServerParameters;
+  params?: ServerParameters;
+  getParams?: () => Promise<ServerParameters | undefined>;
   namespaceUuid?: string;
   /** Operation label for log lines, e.g. "tools/list". */
   operation: string;
@@ -79,12 +80,26 @@ export async function requestWithSessionRecovery<T>(
       })`,
     );
 
+    let params = opts.params;
+    if (!params && opts.getParams) {
+      try {
+        params = await opts.getParams();
+      } catch (paramsError) {
+        logger.warn(
+          `Unable to resolve server parameters for ${opts.serverUuid} during ${opts.operation} recovery:`,
+          paramsError,
+        );
+        throw error;
+      }
+    }
+    if (!params) throw error;
+
     await opts.pool.invalidateServerConnection(opts.sessionId, opts.serverUuid);
 
     const fresh = await opts.pool.getSession(
       opts.sessionId,
       opts.serverUuid,
-      opts.params,
+      params,
       opts.namespaceUuid,
     );
     if (!fresh) {

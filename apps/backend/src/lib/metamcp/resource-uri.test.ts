@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addResourceServerUuid,
   getToolUiResourceServerUuids,
   getToolUiResourceUris,
 } from "./resource-uri";
@@ -53,5 +54,17 @@ describe("getToolUiResourceServerUuids", () => {
 
   it("returns no backend for an unadvertised resource", () => {
     expect(getToolUiResourceServerUuids(resourceUri, [])).toEqual([]);
+  });
+});
+
+describe("addResourceServerUuid", () => {
+  it("preserves distinct owners and deduplicates repeated advertisements", () => {
+    const owners: Record<string, Set<string>> = {};
+
+    addResourceServerUuid(owners, resourceUri, "skilljack");
+    addResourceServerUuid(owners, resourceUri, "skilljack");
+    addResourceServerUuid(owners, resourceUri, "another-server");
+
+    expect([...owners[resourceUri]]).toEqual(["skilljack", "another-server"]);
   });
 });

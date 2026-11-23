@@ -91,6 +91,68 @@ describe("requestWithSessionRecovery", () => {
     expect(attempt).toHaveBeenNthCalledWith(2, fresh);
   });
 
+  it("does not resolve parameters when a cached session read succeeds", async () => {
+    const stale = makeSession("stale");
+    const pool = makePool(undefined);
+    const getParams = vi.fn();
+    const attempt = vi.fn().mockResolvedValue("ok");
+
+    await expect(
+      requestWithSessionRecovery({
+        ...baseOpts(pool, stale),
+        params: undefined,
+        getParams,
+        attempt,
+      }),
+    ).resolves.toBe("ok");
+    expect(getParams).not.toHaveBeenCalled();
+    expect(pool.invalidateServerConnection).not.toHaveBeenCalled();
+  });
+
+  it("resolves parameters lazily only when a cached session needs recovery", async () => {
+    const stale = makeSession("stale");
+    const fresh = makeSession("fresh");
+    const pool = makePool(fresh);
+    const getParams = vi.fn().mockResolvedValue(params);
+    const attempt = vi
+      .fn()
+      .mockRejectedValueOnce(sessionLostError())
+      .mockResolvedValueOnce("ok");
+
+    await expect(
+      requestWithSessionRecovery({
+        ...baseOpts(pool, stale),
+        params: undefined,
+        getParams,
+        attempt,
+      }),
+    ).resolves.toBe("ok");
+    expect(getParams).toHaveBeenCalledOnce();
+    expect(pool.getSession).toHaveBeenCalledWith(
+      "session-abc",
+      "server-1",
+      params,
+      "ns-1",
+    );
+  });
+
+  it("does not invalidate a cached session when recovery parameters are unavailable", async () => {
+    const stale = makeSession("stale");
+    const pool = makePool(undefined);
+    const failure = sessionLostError();
+    const attempt = vi.fn().mockRejectedValue(failure);
+
+    await expect(
+      requestWithSessionRecovery({
+        ...baseOpts(pool, stale),
+        params: undefined,
+        getParams: vi.fn().mockResolvedValue(undefined),
+        attempt,
+      }),
+    ).rejects.toBe(failure);
+    expect(pool.invalidateServerConnection).not.toHaveBeenCalled();
+  });
+
   it("recovers from the SDK transport-lost envelope too", async () => {
     const stale = makeSession("stale");
     const fresh = makeSession("fresh");
@@ -142,9 +204,15 @@ describe("requestWithSessionRecovery", () => {
       .mockRejectedValueOnce(sessionLostError())
       .mockRejectedValueOnce(secondFailure);
 
+    const onFreshSession = vi.fn();
     await expect(
-      requestWithSessionRecovery({ ...baseOpts(pool, stale), attempt }),
+      requestWithSessionRecovery({
+        ...baseOpts(pool, stale),
+        attempt,
+        onFreshSession,
+      }),
     ).rejects.toBe(secondFailure);
+    expect(onFreshSession).toHaveBeenCalledWith(fresh);
     expect(attempt).toHaveBeenCalledTimes(2);
   });
 });

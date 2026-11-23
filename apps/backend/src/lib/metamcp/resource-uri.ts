@@ -33,3 +33,12 @@ export function getToolUiResourceServerUuids(
     ),
   ];
 }
+
+export function addResourceServerUuid(
+  resourceOwners: Record<string, Set<string>>,
+  resourceUri: string,
+  serverUuid: string,
+): void {
+  const serverUuids = (resourceOwners[resourceUri] ??= new Set());
+  serverUuids.add(serverUuid);
+}
