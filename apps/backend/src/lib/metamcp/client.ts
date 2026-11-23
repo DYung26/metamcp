@@ -100,9 +100,14 @@ export const createMetaMcpClient = (
     const hasHeaders = Object.keys(headers).length > 0;
 
     if (!hasHeaders) {
-      transport = new SSEClientTransport(new URL(transformedUrl));
+      transport = new SSEClientTransport(new URL(transformedUrl), {
+        // Preserve the pre-1.32 behavior for upstream servers that redirect across origins.
+        redirectPolicy: "follow",
+      });
     } else {
       transport = new SSEClientTransport(new URL(transformedUrl), {
+        // Preserve the pre-1.32 behavior for upstream servers that redirect across origins.
+        redirectPolicy: "follow",
         requestInit: {
           headers,
         },
@@ -130,9 +135,14 @@ export const createMetaMcpClient = (
     const hasHeaders = Object.keys(headers).length > 0;
 
     if (!hasHeaders) {
-      transport = new StreamableHTTPClientTransport(new URL(transformedUrl));
+      transport = new StreamableHTTPClientTransport(new URL(transformedUrl), {
+        // Preserve the pre-1.32 behavior for upstream servers that redirect across origins.
+        redirectPolicy: "follow",
+      });
     } else {
       transport = new StreamableHTTPClientTransport(new URL(transformedUrl), {
+        // Preserve the pre-1.32 behavior for upstream servers that redirect across origins.
+        redirectPolicy: "follow",
         requestInit: {
           headers,
         },
