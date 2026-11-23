@@ -52,7 +52,7 @@ export const configService = {
     const config = await configRepo.getConfig(
       ConfigKeyEnum.enum.MCP_RESET_TIMEOUT_ON_PROGRESS,
     );
-    return config?.value === "true" || true;
+    return config?.value !== "false";
   },
 
   async setMcpResetTimeoutOnProgress(enabled: boolean): Promise<void> {
