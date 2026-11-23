@@ -6,6 +6,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import express from "express";
 import { z } from "zod";
 
+import logger from "@/utils/logger";
+
 import { METAMCP_HOSTS, type MetaMcpHostId } from "./hosts";
 import {
   checkHostHealth,
@@ -18,7 +20,13 @@ import {
 const CONFIRMATION_PHRASE = "CONFIRM_METAMCP_OPERATION";
 const HOST_SCHEMA = z.enum(["vps", "arch", "omarchy"]);
 const ACTION_SCHEMA = z.enum(["start", "stop", "restart"]);
-const MAX_SESSIONS = 100;
+const DEFAULT_MAX_SESSIONS = 100;
+const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
+function getPositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function createMetaMcpOpsServer() {
   const server = new McpServer({ name: "metamcp-ops", version: "1.0.0" });
@@ -246,8 +254,46 @@ export function createMetaMcpOpsRouter() {
   const router = express.Router();
   const transports = new Map<string, StreamableHTTPServerTransport>();
   const servers = new Map<string, McpServer>();
+  const lastActivityAt = new Map<string, number>();
+  const closingSessions = new Set<string>();
+  const maxSessions = getPositiveInteger(
+    process.env.METAMCP_OPS_MAX_SESSIONS,
+    DEFAULT_MAX_SESSIONS,
+  );
+  const sessionIdleTimeoutMs = getPositiveInteger(
+    process.env.METAMCP_OPS_SESSION_IDLE_TIMEOUT_MS,
+    DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+  );
   const apiKey = getConfiguredApiKey();
   const trustedClientIps = getTrustedClientIps();
+
+  // Clients do not always send DELETE when their process exits or their
+  // connection is lost. Reclaim sessions that have received no traffic for
+  // the configured idle period before enforcing the session cap.
+  const cleanupExpiredSessions = async () => {
+    const now = Date.now();
+    for (const [sessionId, lastActivity] of lastActivityAt) {
+      if (now - lastActivity < sessionIdleTimeoutMs) continue;
+      if (closingSessions.has(sessionId)) continue;
+
+      closingSessions.add(sessionId);
+      const transport = transports.get(sessionId);
+      transports.delete(sessionId);
+      servers.delete(sessionId);
+      lastActivityAt.delete(sessionId);
+
+      try {
+        await transport?.close();
+      } catch (error) {
+        logger.warn(
+          "Failed to close expired MetaMCP operations session:",
+          error,
+        );
+      } finally {
+        closingSessions.delete(sessionId);
+      }
+    }
+  };
 
   router.get("/health", (_req, res) =>
     res.json({ status: "ok", service: "metamcp-ops" }),
@@ -264,6 +310,7 @@ export function createMetaMcpOpsRouter() {
 
   router.post("/mcp", async (req, res) => {
     try {
+      await cleanupExpiredSessions();
       const sessionId = req.headers["mcp-session-id"];
       let transport =
         typeof sessionId === "string" ? transports.get(sessionId) : undefined;
@@ -273,7 +320,7 @@ export function createMetaMcpOpsRouter() {
           res.status(404).json({ error: "MCP session not found" });
           return;
         }
-        if (transports.size >= MAX_SESSIONS) {
+        if (transports.size >= maxSessions) {
           res
             .status(503)
             .json({ error: "MetaMCP operations session limit reached" });
@@ -286,14 +333,18 @@ export function createMetaMcpOpsRouter() {
           onsessioninitialized: (newSessionId) => {
             transports.set(newSessionId, sessionTransport);
             servers.set(newSessionId, server);
+            lastActivityAt.set(newSessionId, Date.now());
           },
           onsessionclosed: (closedSessionId) => {
             transports.delete(closedSessionId);
             servers.delete(closedSessionId);
+            lastActivityAt.delete(closedSessionId);
           },
         });
         transport = sessionTransport;
         await server.connect(transport);
+      } else if (typeof sessionId === "string") {
+        lastActivityAt.set(sessionId, Date.now());
       }
 
       await transport.handleRequest(req, res, req.body);
@@ -308,6 +359,7 @@ export function createMetaMcpOpsRouter() {
   });
 
   router.get("/mcp", async (req, res) => {
+    await cleanupExpiredSessions();
     const sessionId = req.headers["mcp-session-id"];
     const transport =
       typeof sessionId === "string" ? transports.get(sessionId) : undefined;
@@ -315,10 +367,12 @@ export function createMetaMcpOpsRouter() {
       res.status(404).json({ error: "MCP session not found" });
       return;
     }
+    lastActivityAt.set(sessionId as string, Date.now());
     await transport.handleRequest(req, res);
   });
 
   router.delete("/mcp", async (req, res) => {
+    await cleanupExpiredSessions();
     const sessionId = req.headers["mcp-session-id"];
     const transport =
       typeof sessionId === "string" ? transports.get(sessionId) : undefined;

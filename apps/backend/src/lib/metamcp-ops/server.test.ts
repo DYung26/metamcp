@@ -82,6 +82,53 @@ describe("MetaMCP operations MCP", () => {
     }
   });
 
+  it("reclaims idle sessions before enforcing the session cap", async () => {
+    vi.stubEnv("METAMCP_OPS_API_KEY", TEST_API_KEY);
+    vi.stubEnv("METAMCP_OPS_MAX_SESSIONS", "1");
+    vi.stubEnv("METAMCP_OPS_SESSION_IDLE_TIMEOUT_MS", "1000");
+    const app = express();
+    app.use(express.json());
+    app.use(createMetaMcpOpsRouter());
+    const { server, baseUrl } = await startServer(app);
+    const initializeRequest = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "metamcp-ops-idle-test", version: "1.0.0" },
+      },
+    };
+    const requestInit = {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TEST_API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify(initializeRequest),
+    };
+
+    try {
+      const firstResponse = await fetch(`${baseUrl}/mcp`, requestInit);
+      expect(firstResponse.status).toBe(200);
+      const firstSessionId = firstResponse.headers.get("mcp-session-id");
+      expect(firstSessionId).toBeTruthy();
+
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      const secondResponse = await fetch(`${baseUrl}/mcp`, requestInit);
+      expect(secondResponse.status).toBe(200);
+      expect(secondResponse.headers.get("mcp-session-id")).not.toBe(
+        firstSessionId,
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("advertises the management tools and enforces action confirmation over MCP", async () => {
     vi.stubEnv("METAMCP_OPS_API_KEY", TEST_API_KEY);
     const app = express();

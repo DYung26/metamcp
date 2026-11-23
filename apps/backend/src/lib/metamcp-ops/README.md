@@ -33,6 +33,8 @@ The `metamcp-ops` server is separate from this extension. It provides infrastruc
 - `METAMCP_OPS_PORT`: optional listener port; defaults to `12010`.
 - `METAMCP_OPS_HOST`: optional bind IP; defaults to `127.0.0.1`. For the VPS MetaMCP container, bind to the current Docker host-gateway address.
 - `METAMCP_OPS_TRUSTED_IPS`: optional comma-separated client IP allowlist. Requests from these exact IPs may use the MCP endpoint without a bearer token; all other clients require `METAMCP_OPS_API_KEY`.
+- `METAMCP_OPS_MAX_SESSIONS`: optional maximum number of concurrent MCP sessions; defaults to `100`.
+- `METAMCP_OPS_SESSION_IDLE_TIMEOUT_MS`: optional idle timeout in milliseconds; defaults to `900000` (15 minutes). Expired sessions are reclaimed when the next MCP request arrives, before enforcing the session cap. Clients can reconnect after an idle session expires.
 
 ## Tools
 
