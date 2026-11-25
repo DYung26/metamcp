@@ -7,6 +7,10 @@ import {
   setAdminToolsContext,
 } from "../admin-mcp/admin-session-context";
 import { configService } from "../config.service";
+import {
+  SessionAgeMetrics,
+  summarizeSessionAges,
+} from "../session-age-metrics";
 import { getMcpServers } from "./fetch-metamcp";
 import { anyServerRequiresForwardedHeaders } from "./header-forwarding";
 import { mcpServerPool } from "./mcp-server-pool";
@@ -27,6 +31,9 @@ export interface MetaMcpServerInstance {
 export interface MetaMcpServerPoolStatus {
   idle: number;
   active: number;
+  activeSessionAges: SessionAgeMetrics;
+  activeSessionIdleAges: SessionAgeMetrics;
+  idleServerAges: SessionAgeMetrics;
   activeSessionIds: string[];
   idleNamespaceUuids: string[];
 }
@@ -38,6 +45,9 @@ export class MetaMcpServerPool {
   // Idle MetaMCP servers: namespaceUuid -> MetaMcpServerInstance (no sessionId assigned yet)
   private idleServers: Record<string, MetaMcpServerInstance> = {};
 
+  // Creation timestamps for idle servers, used for pool age diagnostics.
+  private idleServerTimestamps: Record<string, number> = {};
+
   // Active MetaMCP servers: sessionId -> MetaMcpServerInstance
   private activeServers: Record<string, MetaMcpServerInstance> = {};
 
@@ -46,6 +56,7 @@ export class MetaMcpServerPool {
 
   // Session creation timestamps: sessionId -> timestamp
   private sessionTimestamps: Record<string, number> = {};
+  private sessionCreatedAt: Record<string, number> = {};
 
   // Track ongoing idle server creation to prevent duplicates
   private creatingIdleServers: Set<string> = new Set();
@@ -135,9 +146,11 @@ export class MetaMcpServerPool {
       if (idleServer) {
         // Convert idle server to active server
         delete this.idleServers[namespaceUuid];
+        delete this.idleServerTimestamps[namespaceUuid];
         this.activeServers[sessionId] = idleServer;
         this.sessionToNamespace[sessionId] = namespaceUuid;
         this.sessionTimestamps[sessionId] = Date.now();
+        this.sessionCreatedAt[sessionId] = Date.now();
         this.applyAdminToolsContext(idleServer, adminTools);
 
         logger.info(
@@ -166,6 +179,7 @@ export class MetaMcpServerPool {
     this.activeServers[sessionId] = newServer;
     this.sessionToNamespace[sessionId] = namespaceUuid;
     this.sessionTimestamps[sessionId] = Date.now();
+    this.sessionCreatedAt[sessionId] = Date.now();
     this.applyAdminToolsContext(newServer, adminTools);
 
     logger.info(
@@ -266,6 +280,7 @@ export class MetaMcpServerPool {
       };
 
       this.idleServers[namespaceUuid] = wrappedServer;
+      this.idleServerTimestamps[namespaceUuid] = Date.now();
       logger.info(`Created idle MetaMCP server for namespace ${namespaceUuid}`);
     }
   }
@@ -300,6 +315,7 @@ export class MetaMcpServerPool {
             internalSessionId: newServer.internalSessionId,
           };
           this.idleServers[namespaceUuid] = wrappedServer;
+          this.idleServerTimestamps[namespaceUuid] = Date.now();
           logger.info(
             `Created background idle MetaMCP server for namespace ${namespaceUuid}`,
           );
@@ -350,33 +366,45 @@ export class MetaMcpServerPool {
       return;
     }
 
+    // Detach synchronously before awaiting either cleanup operation. A timer
+    // sweep, DELETE request, and transport-close event can all race here.
+    // Only the first caller owns the detached server and may close it.
+    const namespaceUuid = this.sessionToNamespace[sessionId];
+    delete this.activeServers[sessionId];
+    delete this.sessionTimestamps[sessionId];
+    delete this.sessionCreatedAt[sessionId];
+    delete this.sessionToNamespace[sessionId];
     clearAdminToolsContext(activeServer.internalSessionId);
 
-    // Cleanup the MetaMCP server
-    await activeServer.cleanup();
+    let cleanupError: unknown;
+    try {
+      await activeServer.cleanup();
+    } catch (error) {
+      cleanupError = error;
+      logger.error(`Error closing MetaMCP server session ${sessionId}:`, error);
+    }
 
-    // Also cleanup the corresponding MCP server pool session
-    await mcpServerPool.cleanupSession(activeServer.internalSessionId);
+    try {
+      await mcpServerPool.cleanupSession(activeServer.internalSessionId);
+    } catch (error) {
+      cleanupError ??= error;
+      logger.error(
+        `Error closing backend MCP pool session for ${sessionId}:`,
+        error,
+      );
+    }
 
-    // Remove from active servers
-    delete this.activeServers[sessionId];
-
-    // Clean up session timestamp
-    delete this.sessionTimestamps[sessionId];
-
-    // Get the namespace UUID and create a new idle server if needed.
-    // Skip idle replenishment for namespaces that require forwarded headers
-    // since idle servers can't carry per-client headers.
-    const namespaceUuid = this.sessionToNamespace[sessionId];
+    // Replenish only after the old connection has been detached and cleaned.
+    // Skip idle replenishment for namespaces that require forwarded headers.
     if (namespaceUuid) {
       const cached = this.needsFreshServerCache[namespaceUuid];
       if (!cached || !cached.needsFresh) {
         this.createIdleServerAsync(namespaceUuid);
       }
-      delete this.sessionToNamespace[sessionId];
     }
 
     logger.info(`Cleaned up MetaMCP server pool session ${sessionId}`);
+    if (cleanupError) throw cleanupError;
   }
 
   /**
@@ -401,9 +429,11 @@ export class MetaMcpServerPool {
 
     // Clear all state
     this.idleServers = {};
+    this.idleServerTimestamps = {};
     this.activeServers = {};
     this.sessionToNamespace = {};
     this.sessionTimestamps = {};
+    this.sessionCreatedAt = {};
     this.creatingIdleServers.clear();
     this.needsFreshServerCache = {};
 
@@ -426,6 +456,15 @@ export class MetaMcpServerPool {
     return {
       idle,
       active,
+      activeSessionAges: summarizeSessionAges(
+        Object.values(this.sessionCreatedAt),
+      ),
+      activeSessionIdleAges: summarizeSessionAges(
+        Object.values(this.sessionTimestamps),
+      ),
+      idleServerAges: summarizeSessionAges(
+        Object.values(this.idleServerTimestamps),
+      ),
       activeSessionIds: Object.keys(this.activeServers),
       idleNamespaceUuids: Object.keys(this.idleServers),
     };
@@ -477,6 +516,7 @@ export class MetaMcpServerPool {
         );
       }
       delete this.idleServers[namespaceUuid];
+      delete this.idleServerTimestamps[namespaceUuid];
     }
 
     // Remove from creating set if it's in progress
@@ -523,6 +563,7 @@ export class MetaMcpServerPool {
         );
       }
       delete this.idleServers[namespaceUuid];
+      delete this.idleServerTimestamps[namespaceUuid];
     }
 
     // Remove from creating set if it's in progress
@@ -571,9 +612,11 @@ export class MetaMcpServerPool {
     if (idleServer) {
       // Convert idle server to active OpenAPI server
       delete this.idleServers[namespaceUuid];
+      delete this.idleServerTimestamps[namespaceUuid];
       this.activeServers[sessionId] = idleServer;
       this.sessionToNamespace[sessionId] = namespaceUuid;
       this.sessionTimestamps[sessionId] = Date.now();
+      this.sessionCreatedAt[sessionId] = Date.now();
 
       logger.info(
         `Converted idle MetaMCP server to OpenAPI server for namespace ${namespaceUuid}, session ${sessionId}`,
@@ -598,6 +641,7 @@ export class MetaMcpServerPool {
     this.activeServers[sessionId] = newServer;
     this.sessionToNamespace[sessionId] = namespaceUuid;
     this.sessionTimestamps[sessionId] = Date.now();
+    this.sessionCreatedAt[sessionId] = Date.now();
 
     logger.info(
       `Created new OpenAPI MetaMCP server for namespace ${namespaceUuid}, session ${sessionId}`,
@@ -641,6 +685,7 @@ export class MetaMcpServerPool {
         delete this.activeServers[sessionId];
         delete this.sessionToNamespace[sessionId];
         delete this.sessionTimestamps[sessionId];
+        delete this.sessionCreatedAt[sessionId];
       }
 
       // Create a new OpenAPI session with updated configuration

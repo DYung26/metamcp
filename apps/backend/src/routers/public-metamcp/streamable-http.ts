@@ -88,54 +88,107 @@ function getSafeHeaders(req: express.Request): Record<string, unknown> {
   return headers;
 }
 
+// Track cleanup ownership across DELETE, transport-close, and expiry paths.
+const cleaningSessions = new Set<string>();
+
 // Cleanup function for a specific session
 const cleanupSession = async (
   sessionId: string,
   transport?: StreamableHTTPServerTransport,
 ) => {
+  if (cleaningSessions.has(sessionId)) {
+    return;
+  }
+  cleaningSessions.add(sessionId);
+
+  // Detach from the HTTP session manager before awaiting transport shutdown.
+  // This prevents a second cleanup path from closing the same transport.
+  const sessionTransport = transport || sessionManager.getSession(sessionId);
+  sessionManager.removeSession(sessionId);
   logger.info(`Cleaning up StreamableHTTP session ${sessionId}`);
 
   try {
-    // Use provided transport or get from session manager
-    const sessionTransport = transport || sessionManager.getSession(sessionId);
+    let cleanupError: unknown;
 
     if (sessionTransport) {
-      logger.info(`Closing transport for session ${sessionId}`);
-      await sessionTransport.close();
-      logger.info(`Transport cleaned up for session ${sessionId}`);
+      logger.info("Closing transport for session " + sessionId);
+      try {
+        await sessionTransport.close();
+        logger.info("Transport cleaned up for session " + sessionId);
+      } catch (error) {
+        cleanupError = error;
+        logger.error(
+          "Error closing transport for session " + sessionId + ":",
+          error,
+        );
+      }
     } else {
-      logger.info(`No transport found for session ${sessionId}`);
+      logger.info("No transport found for session " + sessionId);
     }
 
-    // Remove from session manager
-    sessionManager.removeSession(sessionId);
+    // Always release the MetaMCP pool lease, even if transport.close fails.
+    try {
+      await metaMcpServerPool.cleanupSession(sessionId);
+    } catch (error) {
+      cleanupError ??= error;
+      logger.error(
+        "Error cleaning up MetaMCP pool session " + sessionId + ":",
+        error,
+      );
+    }
 
-    // Clean up MetaMCP server pool session
-    await metaMcpServerPool.cleanupSession(sessionId);
-
-    logger.info(`Session ${sessionId} cleanup completed successfully`);
-  } catch (error) {
-    logger.error(`Error during cleanup of session ${sessionId}:`, error);
-    // Even if cleanup fails, remove the session from manager to prevent memory leaks
-    sessionManager.removeSession(sessionId);
-    logger.info(`Removed orphaned session ${sessionId} due to cleanup error`);
-    throw error;
+    if (cleanupError) {
+      logger.info(
+        "Removed orphaned session " + sessionId + " after cleanup error",
+      );
+      throw cleanupError;
+    }
+    logger.info("Session " + sessionId + " cleanup completed successfully");
+  } finally {
+    cleaningSessions.delete(sessionId);
   }
 };
 
-// Health check endpoint to monitor sessions
+// Aggregate health metrics only. Session IDs are deliberately not exposed by
+// this unauthenticated diagnostic endpoint.
 streamableHttpRouter.get("/health/sessions", (req, res) => {
-  const sessionIds = sessionManager.getSessionIds();
   const poolStatus = metaMcpServerPool.getPoolStatus();
+  const backendPoolStatus = metaMcpServerPool.getMcpServerPoolStatus();
+  const perServerCounts = Object.values(
+    backendPoolStatus.perServerCounts ?? {},
+  );
+  const maxPerServer = backendPoolStatus.maxConnectionsPerServer ?? 0;
 
+  res.setHeader("Cache-Control", "no-store");
   res.json({
     timestamp: new Date().toISOString(),
     streamableHttpSessions: {
-      count: sessionIds.length,
-      sessionIds: sessionIds,
+      count: sessionManager.getSessionCount(),
+      ages: sessionManager.getSessionAgeMetrics(),
+      idleAges: sessionManager.getSessionIdleAgeMetrics(),
     },
-    metaMcpPoolStatus: poolStatus,
-    totalActiveSessions: sessionIds.length + poolStatus.active,
+    metaMcpPoolStatus: {
+      idle: poolStatus.idle,
+      active: poolStatus.active,
+      activeSessionAges: poolStatus.activeSessionAges,
+      activeSessionIdleAges: poolStatus.activeSessionIdleAges,
+      idleServerAges: poolStatus.idleServerAges,
+    },
+    backendConnectionPool: {
+      idle: backendPoolStatus.idle,
+      active: backendPoolStatus.active,
+      pending: backendPoolStatus.pending,
+      total:
+        backendPoolStatus.idle +
+        backendPoolStatus.active +
+        backendPoolStatus.pending,
+      maxTotal: backendPoolStatus.maxTotalConnections,
+      maxPerServer,
+      serversAtPerServerCap: perServerCounts.filter(
+        (count) => maxPerServer > 0 && count >= maxPerServer,
+      ).length,
+    },
+    totalActiveSessions: sessionManager.getSessionCount() + poolStatus.active,
   });
 });
 

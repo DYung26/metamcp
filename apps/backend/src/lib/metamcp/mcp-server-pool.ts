@@ -12,10 +12,17 @@ import { serverErrorTracker } from "./server-error-tracker";
 export interface McpServerPoolStatus {
   idle: number;
   active: number;
+  pending: number;
+  maxTotalConnections: number;
   activeSessionIds: string[];
   idleServerUuids: string[];
   perServerCounts?: Record<string, number>;
   maxConnectionsPerServer?: number;
+}
+
+function getPositiveEnvInteger(name: string, fallback: number): number {
+  const value = Number(process.env[name] ?? "");
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
 const maxConcurrentBackendConnections = Math.max(
@@ -95,11 +102,14 @@ export class McpServerPool {
 
   private constructor(
     defaultIdleCount: number = 1,
-    maxTotalConnections: number = parseInt(
-      process.env.MAX_TOTAL_CONNECTIONS || "100",
-      10,
+    maxTotalConnections: number = getPositiveEnvInteger(
+      "MAX_TOTAL_CONNECTIONS",
+      100,
     ),
-    maxConnectionsPerServer: number = 5,
+    maxConnectionsPerServer: number = getPositiveEnvInteger(
+      "MAX_CONNECTIONS_PER_SERVER",
+      5,
+    ),
   ) {
     this.defaultIdleCount = defaultIdleCount;
     this.maxTotalConnections = maxTotalConnections;
@@ -113,15 +123,15 @@ export class McpServerPool {
    */
   static getInstance(
     defaultIdleCount: number = 1,
-    maxConnectionsPerServer: number = 5,
+    maxConnectionsPerServer?: number,
   ): McpServerPool {
     if (!McpServerPool.instance) {
-      const envMax = parseInt(process.env.MAX_TOTAL_CONNECTIONS || "", 10);
-      const maxConn = Number.isFinite(envMax) && envMax > 0 ? envMax : 100;
+      const maxConn = getPositiveEnvInteger("MAX_TOTAL_CONNECTIONS", 100);
       McpServerPool.instance = new McpServerPool(
         defaultIdleCount,
         maxConn,
-        maxConnectionsPerServer,
+        maxConnectionsPerServer ??
+          getPositiveEnvInteger("MAX_CONNECTIONS_PER_SERVER", 5),
       );
     }
     return McpServerPool.instance;
@@ -785,6 +795,8 @@ export class McpServerPool {
     return {
       idle,
       active,
+      pending: this.pendingTotalConnections,
+      maxTotalConnections: this.maxTotalConnections,
       activeSessionIds: Object.keys(this.activeSessions),
       idleServerUuids: Object.keys(this.idleSessions),
       perServerCounts,
