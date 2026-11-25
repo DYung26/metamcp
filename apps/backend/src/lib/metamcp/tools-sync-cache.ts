@@ -17,7 +17,7 @@ export class ToolsSyncCache {
 
   /** Hash all persisted client-visible tool fields, not just names. */
   hashTools(tools: Array<SyncableTool | string>): string {
-    const canonical = [...tools]
+    const canonical = tools
       .map((tool) =>
         typeof tool === "string"
           ? {
@@ -42,26 +42,29 @@ export class ToolsSyncCache {
       .digest("hex");
   }
 
+  /** Compare a precomputed snapshot hash without serializing the tools again. */
+  hasHashChanged(mcpServerUuid: string, hash: string): boolean {
+    return this.cache.get(mcpServerUuid) !== hash;
+  }
+
   /**
-   * Check if tools have changed since last sync
+   * Check if tools have changed since last sync.
    * @returns true if tools changed or no cache exists, false if unchanged
    */
   hasChanged(
     mcpServerUuid: string,
     tools: Array<SyncableTool | string>,
   ): boolean {
-    const currentHash = this.hashTools(tools);
-    const cachedHash = this.cache.get(mcpServerUuid);
-
-    return cachedHash !== currentHash;
+    return this.hasHashChanged(mcpServerUuid, this.hashTools(tools));
   }
 
-  /**
-   * Update the cache with current tool state
-   */
-  update(mcpServerUuid: string, tools: Array<SyncableTool | string>): void {
-    const hash = this.hashTools(tools);
+  /** Store a precomputed hash after the corresponding persistence succeeds. */
+  updateHash(mcpServerUuid: string, hash: string): void {
     this.cache.set(mcpServerUuid, hash);
+  }
+
+  update(mcpServerUuid: string, tools: Array<SyncableTool | string>): void {
+    this.updateHash(mcpServerUuid, this.hashTools(tools));
   }
 
   /**
@@ -72,10 +75,11 @@ export class ToolsSyncCache {
     mcpServerUuid: string,
     tools: Array<SyncableTool | string>,
   ): boolean {
-    const needsSync = this.hasChanged(mcpServerUuid, tools);
+    const hash = this.hashTools(tools);
+    const needsSync = this.hasHashChanged(mcpServerUuid, hash);
 
     if (needsSync) {
-      this.update(mcpServerUuid, tools);
+      this.updateHash(mcpServerUuid, hash);
     }
 
     return needsSync;

@@ -190,8 +190,16 @@ const getHttpHeaders = (
 const isUnauthorizedMcpError = (error: unknown): boolean => {
   if (error instanceof SseError && error.code === 401) return true;
   if (!error || typeof error !== "object") return false;
-  const candidate = error as { code?: unknown; status?: unknown; statusCode?: unknown };
-  return candidate.code === 401 || candidate.status === 401 || candidate.statusCode === 401;
+  const candidate = error as {
+    code?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+  };
+  return (
+    candidate.code === 401 ||
+    candidate.status === 401 ||
+    candidate.statusCode === 401
+  );
 };
 
 const serverRouter = express.Router();
@@ -303,9 +311,9 @@ const createTransport = async (req: express.Request): Promise<Transport> => {
     const url = transformDockerUrl(query.url as string);
 
     // Check if the server is in error state (for SSE, we need to find server by URL)
-    const servers = await mcpServersRepository.findAll();
-    const matchingServer = servers.find(
-      (server) => server.type === "SSE" && server.url === url,
+    const matchingServer = await mcpServersRepository.findByTypeAndUrl(
+      McpServerTypeEnum.enum.SSE,
+      url,
     );
     if (matchingServer) {
       const isInError = await checkServerErrorStatus(matchingServer.uuid);
@@ -340,9 +348,9 @@ const createTransport = async (req: express.Request): Promise<Transport> => {
     const url = transformDockerUrl(query.url as string);
 
     // Check if the server is in error state (for STREAMABLE_HTTP, we need to find server by URL)
-    const servers = await mcpServersRepository.findAll();
-    const matchingServer = servers.find(
-      (server) => server.type === "STREAMABLE_HTTP" && server.url === url,
+    const matchingServer = await mcpServersRepository.findByTypeAndUrl(
+      McpServerTypeEnum.enum.STREAMABLE_HTTP,
+      url,
     );
     // Do not short-circuit Streamable HTTP requests on a stale ERROR flag:
     // the upstream may be returning an OAuth challenge, and the Inspector
@@ -395,12 +403,16 @@ serverRouter.post("/mcp", async (req, res) => {
         serverTransport = await createTransport(req);
       } catch (error) {
         if (isUnauthorizedMcpError(error)) {
-          logger.info("Received 401 Unauthorized from Streamable HTTP MCP server", {
-            error: error instanceof Error ? error.message : String(error),
-          });
+          logger.info(
+            "Received 401 Unauthorized from Streamable HTTP MCP server",
+            {
+              error: error instanceof Error ? error.message : String(error),
+            },
+          );
           res.status(401).json({
             error: "upstream_unauthorized",
-            error_description: error instanceof Error ? error.message : String(error),
+            error_description:
+              error instanceof Error ? error.message : String(error),
           });
           return;
         }

@@ -111,6 +111,43 @@ describe("McpServerPool connection accounting", () => {
     expect(client.cleanup).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps indexed counts correct across many leases, recycling, and reuse", async () => {
+    const pool = createPool(10, 1);
+    const client = makeClient();
+    vi.mocked(connectMetaMcpClient).mockResolvedValue(client);
+
+    for (let index = 0; index < 1000; index += 1) {
+      const session = await pool.getSession(
+        "session-" + index,
+        "server-a",
+        makeParams("server-a"),
+      );
+      expect(session).toBe(client);
+    }
+
+    expect(connectMetaMcpClient).toHaveBeenCalledTimes(1);
+    expect(pool.getPoolStatus().active).toBe(1);
+    expect(pool.getPoolStatus().perServerCounts?.["server-a"]).toBe(1);
+
+    await Promise.all(
+      Array.from({ length: 1000 }, (_, index) =>
+        pool.cleanupSession("session-" + index),
+      ),
+    );
+
+    expect(pool.getPoolStatus().active).toBe(0);
+    expect(pool.getPoolStatus().perServerCounts?.["server-a"]).toBe(1);
+
+    const reused = await pool.getSession(
+      "session-after-recycle",
+      "server-a",
+      makeParams("server-a"),
+    );
+    expect(reused).toBe(client);
+    expect(pool.getPoolStatus().active).toBe(1);
+    expect(pool.getPoolStatus().perServerCounts?.["server-a"]).toBe(1);
+  });
+
   it("coalesces concurrent startup instead of refusing sessions while a server connects", async () => {
     const pool = createPool(10, 1);
     const client = makeClient();
@@ -230,6 +267,23 @@ describe("McpServerPool connection accounting", () => {
 
     expect(oldClient.cleanup).toHaveBeenCalledTimes(1);
     expect(current).toBe(refreshedClient);
+  });
+
+  it("removes indexed active connections when a server crashes", async () => {
+    const pool = createPool(10, 1);
+    const client = makeClient();
+    vi.mocked(connectMetaMcpClient).mockResolvedValue(client);
+
+    await pool.getSession("session-a", "server-a", makeParams("server-a"));
+    expect(pool.getPoolStatus().perServerCounts?.["server-a"]).toBe(1);
+
+    await pool.handleServerCrashWithoutNamespace("server-a", 1, null);
+
+    expect(client.cleanup).toHaveBeenCalledTimes(1);
+    expect(pool.getPoolStatus().active).toBe(0);
+    expect(pool.getPoolStatus().perServerCounts?.["server-a"]).toBe(0);
+    await pool.cleanupSession("session-a");
+    expect(pool.getPoolStatus().perServerCounts?.["server-a"]).toBe(0);
   });
 
   it("invalidates a shared physical connection only once", async () => {

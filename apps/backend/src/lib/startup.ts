@@ -1,10 +1,8 @@
-import { ServerParameters } from "@repo/zod-types";
-
 import { mcpServersRepository, namespacesRepository } from "../db/repositories";
 import { initializeEnvironmentConfiguration } from "./bootstrap.service";
 import { metaMcpServerPool } from "./metamcp";
 import { serverErrorTracker } from "./metamcp/server-error-tracker";
-import { convertDbServerToParams } from "./metamcp/utils";
+import { convertDbServersToParams } from "./metamcp/utils";
 
 /**
  * Startup initialization that must happen before the HTTP server begins listening.
@@ -76,14 +74,8 @@ export async function initializeIdleServers() {
     const allDbServers = await mcpServersRepository.findAll();
     console.log(`Found ${allDbServers.length} total MCP servers in database`);
 
-    // Convert all database servers to ServerParameters format
-    const allServerParams: Record<string, ServerParameters> = {};
-    for (const dbServer of allDbServers) {
-      const serverParams = await convertDbServerToParams(dbServer);
-      if (serverParams) {
-        allServerParams[dbServer.uuid] = serverParams;
-      }
-    }
+    // Convert all database servers with one batched OAuth-session lookup.
+    const allServerParams = await convertDbServersToParams(allDbServers);
 
     console.log(
       `Successfully converted ${Object.keys(allServerParams).length} MCP servers to ServerParameters format`,

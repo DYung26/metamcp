@@ -6,7 +6,6 @@ import {
   DeleteMcpServerResponseSchema,
   GetMcpServerResponseSchema,
   ListMcpServersResponseSchema,
-  McpServerTypeEnum,
   UpdateMcpServerRequestSchema,
   UpdateMcpServerResponseSchema,
 } from "@repo/zod-types";
@@ -24,7 +23,10 @@ import { mcpServerPool } from "../lib/metamcp/mcp-server-pool";
 import { clearOverrideCache } from "../lib/metamcp/metamcp-middleware/tool-overrides.functional";
 import { metaMcpServerPool } from "../lib/metamcp/metamcp-server-pool";
 import { serverErrorTracker } from "../lib/metamcp/server-error-tracker";
-import { convertDbServerToParams } from "../lib/metamcp/utils";
+import {
+  convertDbServersToParams,
+  convertDbServerToParams,
+} from "../lib/metamcp/utils";
 import { persistPreRegisteredOAuthClient } from "./pre-registered-oauth";
 
 export const mcpServersImplementations = {
@@ -180,33 +182,43 @@ export const mcpServersImplementations = {
           await mcpServersRepository.bulkCreate(serversToInsert);
         imported = serversToInsert.length;
 
-        // Ensure idle sessions for all imported servers (async)
+        // Resolve OAuth sessions in one query, then initialize each server
+        // asynchronously.
         if (createdServers && createdServers.length > 0) {
-          createdServers.forEach(async (server) => {
-            try {
-              const params = await convertDbServerToParams(server);
-              if (params) {
-                mcpServerPool
-                  .ensureIdleSessionForNewServer(server.uuid, params)
-                  .then(() => {
-                    logger.info(
-                      `Ensured idle session for bulk imported server: ${server.name} (${server.uuid})`,
-                    );
-                  })
-                  .catch((error) => {
-                    logger.error(
-                      `Error ensuring idle session for bulk imported server ${server.name} (${server.uuid}):`,
-                      error,
-                    );
-                  });
+          void convertDbServersToParams(createdServers)
+            .then((paramsByUuid) => {
+              for (const server of createdServers) {
+                const params = paramsByUuid[server.uuid];
+                if (!params) continue;
+
+                try {
+                  mcpServerPool
+                    .ensureIdleSessionForNewServer(server.uuid, params)
+                    .then(() => {
+                      logger.info(
+                        `Ensured idle session for bulk imported server: ${server.name} (${server.uuid})`,
+                      );
+                    })
+                    .catch((error) => {
+                      logger.error(
+                        `Error ensuring idle session for bulk imported server ${server.name} (${server.uuid}):`,
+                        error,
+                      );
+                    });
+                } catch (error) {
+                  logger.error(
+                    `Error processing idle session for bulk imported server ${server.name} (${server.uuid}):`,
+                    error,
+                  );
+                }
               }
-            } catch (error) {
+            })
+            .catch((error) => {
               logger.error(
-                `Error processing idle session for bulk imported server ${server.name} (${server.uuid}):`,
+                "Error resolving server parameters for bulk imported MCP servers:",
                 error,
               );
-            }
-          });
+            });
         }
       }
 

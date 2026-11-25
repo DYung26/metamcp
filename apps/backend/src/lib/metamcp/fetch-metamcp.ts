@@ -69,6 +69,7 @@ export async function getMcpServers(
       .where(and(...whereConditions));
 
     const serverDict: Record<string, ServerParameters> = {};
+    const serverUuids = servers.map((server) => server.uuid);
     const oauthSessions = servers.length
       ? await db
           .select({
@@ -76,16 +77,15 @@ export async function getMcpServers(
             tokens: oauthSessionsTable.tokens,
           })
           .from(oauthSessionsTable)
-          .where(
-            inArray(
-              oauthSessionsTable.mcp_server_uuid,
-              servers.map((server) => server.uuid),
-            ),
-          )
+          .where(inArray(oauthSessionsTable.mcp_server_uuid, serverUuids))
       : [];
-    const oauthSessionByServer = new Map(
-      oauthSessions.map((session) => [session.mcp_server_uuid, session]),
-    );
+    const oauthSessionByServer = new Map<
+      string,
+      (typeof oauthSessions)[number]
+    >();
+    for (const session of oauthSessions) {
+      oauthSessionByServer.set(session.mcp_server_uuid, session);
+    }
 
     for (const server of servers) {
       // OAuth tokens are fetched in one query for the namespace, not N+1 queries.

@@ -53,17 +53,11 @@ export function extractForwardedHeaders(
   const result: Record<string, Record<string, string>> = {};
 
   for (const [uuid, params] of Object.entries(serverParams)) {
-    if (
-      !params.forward_headers ||
-      Object.keys(params.forward_headers).length === 0
-    ) {
-      continue;
-    }
+    const headerMappings = Object.entries(params.forward_headers || {});
+    if (headerMappings.length === 0) continue;
 
     const forwarded: Record<string, string> = {};
-    for (const [clientHeaderName, serverHeaderName] of Object.entries(
-      params.forward_headers,
-    )) {
+    for (const [clientHeaderName, serverHeaderName] of headerMappings) {
       const lowerName = clientHeaderName.toLowerCase();
 
       // Skip denied headers for security (exact match + prefix match)

@@ -23,6 +23,28 @@ describe("createConcurrencyLimiter", () => {
     expect(active).toBe(0);
   });
 
+  it("preserves FIFO order across a large waiter queue", async () => {
+    const run = createConcurrencyLimiter(1);
+    let releaseFirst: (() => void) | undefined;
+    const first = run(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        }),
+    );
+    const order: number[] = [];
+    const queued = Array.from({ length: 2000 }, (_, index) =>
+      run(async () => {
+        order.push(index);
+      }),
+    );
+
+    releaseFirst?.();
+    await Promise.all([first, ...queued]);
+
+    expect(order).toEqual(Array.from({ length: 2000 }, (_, index) => index));
+  });
+
   it("releases the slot after a task rejects", async () => {
     const run = createConcurrencyLimiter(1);
     await expect(
