@@ -49,11 +49,17 @@ function mergeAnnotations(
 class ToolOverridesCache {
   private reverseNameCache = new Map<string, string>();
 
-  private getReverseKey(namespaceUuid: string, exposedToolName: string): string {
+  private getReverseKey(
+    namespaceUuid: string,
+    exposedToolName: string,
+  ): string {
     return namespaceUuid + ":" + exposedToolName;
   }
 
-  getOriginalName(namespaceUuid: string, exposedToolName: string): string | null {
+  getOriginalName(
+    namespaceUuid: string,
+    exposedToolName: string,
+  ): string | null {
     return (
       this.reverseNameCache.get(
         this.getReverseKey(namespaceUuid, exposedToolName),

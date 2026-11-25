@@ -128,7 +128,9 @@ describe("mapOverrideNamesToOriginal", () => {
 
     expect(db.select).toHaveBeenCalledTimes(1);
     expect(firstResult.get(toolNames[0])).toBe("first-server__first-original");
-    expect(firstResult.get(toolNames[1])).toBe("second-server__second-original");
+    expect(firstResult.get(toolNames[1])).toBe(
+      "second-server__second-original",
+    );
     expect(secondResult).toEqual(firstResult);
   });
 
