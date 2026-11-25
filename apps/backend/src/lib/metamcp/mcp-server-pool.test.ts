@@ -11,6 +11,15 @@ import {
 import { type ConnectedClient, connectMetaMcpClient } from "./client";
 import { McpServerPool, mcpServerPool } from "./mcp-server-pool";
 
+vi.mock("@/utils/logger", () => ({
+  default: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
 vi.mock("./client", () => ({
   connectMetaMcpClient: vi.fn(),
 }));
