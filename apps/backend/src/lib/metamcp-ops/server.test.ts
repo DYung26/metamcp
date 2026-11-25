@@ -44,6 +44,14 @@ describe("MetaMCP operations MCP", () => {
     try {
       const health = await fetch(`${baseUrl}/health`);
       expect(health.status).toBe(200);
+      const healthData = await health.json();
+      expect(healthData.sessions).toMatchObject({
+        active: 0,
+        max: 100,
+        available: 100,
+        atCapacity: false,
+        idleTimeoutMs: 15 * 60 * 1000,
+      });
       const unauthorized = await fetch(`${baseUrl}/mcp`, { method: "POST" });
       expect(unauthorized.status).toBe(401);
     } finally {
@@ -117,6 +125,14 @@ describe("MetaMCP operations MCP", () => {
       expect(firstSessionId).toBeTruthy();
 
       await new Promise((resolve) => setTimeout(resolve, 1100));
+      const healthResponse = await fetch(baseUrl + "/health");
+      const healthData = await healthResponse.json();
+      expect(healthData.sessions).toMatchObject({
+        active: 0,
+        max: 1,
+        available: 1,
+        atCapacity: false,
+      });
       const secondResponse = await fetch(`${baseUrl}/mcp`, requestInit);
       expect(secondResponse.status).toBe(200);
       expect(secondResponse.headers.get("mcp-session-id")).not.toBe(

@@ -295,9 +295,29 @@ export function createMetaMcpOpsRouter() {
     }
   };
 
-  router.get("/health", (_req, res) =>
-    res.json({ status: "ok", service: "metamcp-ops" }),
-  );
+  router.get("/health", async (_req, res) => {
+    await cleanupExpiredSessions();
+    const now = Date.now();
+    const oldestIdleMs = Math.max(
+      0,
+      ...Array.from(
+        lastActivityAt.values(),
+        (lastActivity) => now - lastActivity,
+      ),
+    );
+    res.json({
+      status: "ok",
+      service: "metamcp-ops",
+      sessions: {
+        active: transports.size,
+        max: maxSessions,
+        available: Math.max(0, maxSessions - transports.size),
+        atCapacity: transports.size >= maxSessions,
+        idleTimeoutMs: sessionIdleTimeoutMs,
+        oldestIdleMs,
+      },
+    });
+  });
 
   router.use((req, res, next) => {
     if (!isAuthorized(req, apiKey, trustedClientIps)) {
@@ -380,6 +400,7 @@ export function createMetaMcpOpsRouter() {
       res.status(404).json({ error: "MCP session not found" });
       return;
     }
+    lastActivityAt.set(sessionId as string, Date.now());
     await transport.handleRequest(req, res);
   });
 
