@@ -222,7 +222,10 @@ async function getToolStatus(
         ),
       );
 
-    const status = toolMapping?.status || null;
+    const status =
+      toolMapping?.status === "ACTIVE" || toolMapping?.status === "INACTIVE"
+        ? toolMapping.status
+        : null;
 
     if (useCache) {
       toolStatusCache.set(

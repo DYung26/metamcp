@@ -31,7 +31,9 @@ export class NamespaceMappingsRepository {
     return updatedMapping;
   }
 
-  async updateToolStatus(input: NamespaceToolStatusUpdate) {
+  async updateToolStatus(
+    input: NamespaceToolStatusUpdate,
+  ): Promise<typeof namespaceToolMappingsTable.$inferSelect | undefined> {
     const [updatedMapping] = await db
       .update(namespaceToolMappingsTable)
       .set({
