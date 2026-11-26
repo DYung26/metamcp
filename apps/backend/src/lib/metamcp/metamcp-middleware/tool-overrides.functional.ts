@@ -1,5 +1,5 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, or } from "drizzle-orm";
 
 import logger from "@/utils/logger";
 
@@ -134,7 +134,12 @@ async function applyToolOverrides(
       .where(
         and(
           eq(namespaceToolMappingsTable.namespace_uuid, namespaceUuid),
-          isNotNull(namespaceToolMappingsTable.override_name),
+          or(
+            isNotNull(namespaceToolMappingsTable.override_name),
+            isNotNull(namespaceToolMappingsTable.override_title),
+            isNotNull(namespaceToolMappingsTable.override_description),
+            isNotNull(namespaceToolMappingsTable.override_annotations),
+          ),
         ),
       );
   } catch (error) {

@@ -1,3 +1,4 @@
+import { isNotNull, or } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { query } = vi.hoisted(() => ({
@@ -12,6 +13,7 @@ vi.mock("drizzle-orm", () => ({
   and: vi.fn(),
   eq: vi.fn(),
   isNotNull: vi.fn(),
+  or: vi.fn(),
 }));
 
 vi.mock("../../../db/schema", () => ({
@@ -19,6 +21,9 @@ vi.mock("../../../db/schema", () => ({
   namespaceToolMappingsTable: {
     namespace_uuid: "namespace_uuid",
     override_name: "override_name",
+    override_title: "override_title",
+    override_description: "override_description",
+    override_annotations: "override_annotations",
     tool_uuid: "tool_uuid",
     mcp_server_uuid: "mcp_server_uuid",
   },
@@ -48,8 +53,58 @@ vi.mock("@/utils/logger", () => ({
 import { db } from "../../../db";
 import {
   clearOverrideCache,
+  createToolOverridesListToolsMiddleware,
   mapOverrideNamesToOriginal,
 } from "./tool-overrides.functional";
+
+describe("tool overrides", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    query.from.mockReturnValue(query);
+    query.innerJoin.mockReturnValue(query);
+    clearOverrideCache();
+  });
+
+  it("applies title, description, and annotation overrides without a name override", async () => {
+    query.where.mockResolvedValue([
+      {
+        toolName: "tool",
+        serverName: "server",
+        overrideName: null,
+        overrideTitle: "Updated title",
+        overrideDescription: "Updated description",
+        overrideAnnotations: { readOnly: true },
+      },
+    ]);
+
+    const middleware = createToolOverridesListToolsMiddleware();
+    const handler = middleware(
+      async () =>
+        ({
+          tools: [
+            { name: "server__tool", description: "Original description" },
+          ],
+        }) as never,
+    );
+    const response = await handler(
+      {} as never,
+      {
+        namespaceUuid: "namespace-1",
+      } as never,
+    );
+
+    expect(response.tools?.[0]).toMatchObject({
+      name: "server__tool",
+      title: "Updated title",
+      description: "Updated description",
+      annotations: { readOnly: true },
+    });
+    expect(isNotNull).toHaveBeenCalledWith("override_title");
+    expect(isNotNull).toHaveBeenCalledWith("override_description");
+    expect(isNotNull).toHaveBeenCalledWith("override_annotations");
+    expect(or).toHaveBeenCalled();
+  });
+});
 
 describe("mapOverrideNamesToOriginal", () => {
   beforeEach(() => {
