@@ -565,10 +565,8 @@ export const createServer = async (
     const abortController = new AbortController();
 
     // Get configurable timeout values
-    const resetTimeoutOnProgress =
-      await configService.getMcpResetTimeoutOnProgress();
-    const timeout = await configService.getMcpTimeout();
-    const maxTotalTimeout = await configService.getMcpMaxTotalTimeout();
+    const { resetTimeoutOnProgress, timeout, maxTotalTimeout } =
+      await configService.getMcpExecutionConfig();
 
     const mcpRequestOptions: RequestOptions = {
       signal: abortController.signal,

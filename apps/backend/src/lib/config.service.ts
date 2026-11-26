@@ -83,6 +83,27 @@ export const configService = {
     return config?.value ? parseInt(config.value, 10) : 60000;
   },
 
+  async getMcpExecutionConfig() {
+    const configs = await configRepo.getConfigs([
+      ConfigKeyEnum.enum.MCP_RESET_TIMEOUT_ON_PROGRESS,
+      ConfigKeyEnum.enum.MCP_TIMEOUT,
+      ConfigKeyEnum.enum.MCP_MAX_TOTAL_TIMEOUT,
+    ]);
+    const configById = new Map(configs.map(({ id, value }) => [id, value]));
+    const timeout = configById.get(ConfigKeyEnum.enum.MCP_TIMEOUT);
+    const maxTotalTimeout = configById.get(
+      ConfigKeyEnum.enum.MCP_MAX_TOTAL_TIMEOUT,
+    );
+
+    return {
+      resetTimeoutOnProgress:
+        configById.get(ConfigKeyEnum.enum.MCP_RESET_TIMEOUT_ON_PROGRESS) !==
+        "false",
+      timeout: timeout ? parseInt(timeout, 10) : 60000,
+      maxTotalTimeout: maxTotalTimeout ? parseInt(maxTotalTimeout, 10) : 60000,
+    };
+  },
+
   async setMcpMaxTotalTimeout(timeout: number): Promise<void> {
     await configRepo.setConfig(
       ConfigKeyEnum.enum.MCP_MAX_TOTAL_TIMEOUT,

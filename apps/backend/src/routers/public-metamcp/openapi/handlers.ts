@@ -9,7 +9,6 @@ import {
 import logger from "@/utils/logger";
 
 import { configService } from "../../../lib/config.service";
-import { ConnectedClient } from "../../../lib/metamcp";
 import { getMcpServers } from "../../../lib/metamcp/fetch-metamcp";
 import { mcpServerPool } from "../../../lib/metamcp/mcp-server-pool";
 import { createAuditCallToolMiddleware } from "../../../lib/metamcp/metamcp-middleware/audit-requests.functional";
@@ -23,23 +22,42 @@ import {
   ListToolsHandler,
   MetaMCPHandlerContext,
 } from "../../../lib/metamcp/metamcp-middleware/functional-middleware";
-import { resolveToolIdentity } from "../../../lib/metamcp/metamcp-middleware/tool-identity";
+import { createToolIdentityResolver } from "@/lib/metamcp/metamcp-middleware/tool-identity";
 import {
   createToolOverridesCallToolMiddleware,
   createToolOverridesListToolsMiddleware,
 } from "../../../lib/metamcp/metamcp-middleware/tool-overrides.functional";
 import { sanitizeName } from "../../../lib/metamcp/utils";
 
+type ToolRoutingCache = {
+  toolToServerUuid: Record<string, string>;
+  serverNameByUuid: Map<string, string>;
+};
+
 // Original List Tools Handler (adapted from metamcp-proxy.ts)
 export const createOriginalListToolsHandler = (
   includeInactiveServers: boolean = false,
+  toolRoutingCache?: ToolRoutingCache,
 ): ListToolsHandler => {
   return async (request, context) => {
+    if (toolRoutingCache) {
+      for (const toolName of Object.keys(toolRoutingCache.toolToServerUuid)) {
+        delete toolRoutingCache.toolToServerUuid[toolName];
+      }
+      toolRoutingCache.serverNameByUuid.clear();
+    }
     const serverParams = await getMcpServers(
       context.namespaceUuid,
       includeInactiveServers,
     );
     const allTools: Tool[] = [];
+    let mcpRequestOptions: RequestOptions;
+    try {
+      mcpRequestOptions = await configService.getMcpExecutionConfig();
+    } catch (error) {
+      logger.error("Error loading MCP request options", error);
+      return { tools: allTools };
+    }
 
     await Promise.allSettled(
       Object.entries(serverParams).map(async ([mcpServerUuid, params]) => {
@@ -57,19 +75,12 @@ export const createOriginalListToolsHandler = (
         // Use name assigned by user, fallback to name from server
         const serverName =
           params.name || session.client.getServerVersion()?.name || "";
+        toolRoutingCache?.serverNameByUuid.set(
+          mcpServerUuid,
+          params.name || sanitizeName(serverName),
+        );
         try {
           // Get configurable timeout values to bypass MCP SDK default enforcement
-          const resetTimeoutOnProgress =
-            await configService.getMcpResetTimeoutOnProgress();
-          const timeout = await configService.getMcpTimeout();
-          const maxTotalTimeout = await configService.getMcpMaxTotalTimeout();
-
-          const mcpRequestOptions: RequestOptions = {
-            resetTimeoutOnProgress,
-            timeout,
-            maxTotalTimeout,
-          };
-
           const result = await session.client.request(
             {
               method: "tools/list",
@@ -82,6 +93,9 @@ export const createOriginalListToolsHandler = (
           const toolsWithSource =
             result.tools?.map((tool) => {
               const toolName = `${sanitizeName(serverName)}__${tool.name}`;
+              if (toolRoutingCache) {
+                toolRoutingCache.toolToServerUuid[toolName] = mcpServerUuid;
+              }
               return {
                 ...tool,
                 name: toolName,
@@ -101,9 +115,11 @@ export const createOriginalListToolsHandler = (
 };
 
 // Original Call Tool Handler (adapted from metamcp-proxy.ts)
-export const createOriginalCallToolHandler = (): CallToolHandler => {
-  const toolToClient: Record<string, ConnectedClient> = {};
-  const toolToServerUuid: Record<string, string> = {};
+export const createOriginalCallToolHandler = (
+  toolRoutingCache?: ToolRoutingCache,
+): CallToolHandler => {
+  const toolToServerUuid = toolRoutingCache?.toolToServerUuid ?? {};
+  const serverNameByUuid = toolRoutingCache?.serverNameByUuid ?? new Map();
 
   return async (request, context) => {
     const { name, arguments: args } = request.params;
@@ -117,30 +133,65 @@ export const createOriginalCallToolHandler = (): CallToolHandler => {
     const serverPrefix = name.substring(0, firstDoubleUnderscoreIndex);
     const originalToolName = name.substring(firstDoubleUnderscoreIndex + 2);
 
-    // Get server parameters and find the right session for this tool
+    // Resolve the server UUID from the tools/list cache, then ask the pool for
+    // the current session instead of scanning every configured server.
     const serverParams = await getMcpServers(context.namespaceUuid);
+    const cachedServerUuid = toolToServerUuid[name];
     let targetSession = null;
 
-    for (const [mcpServerUuid, params] of Object.entries(serverParams)) {
-      const session = await mcpServerPool.getSession(
-        context.sessionId,
-        mcpServerUuid,
-        params,
-        context.namespaceUuid,
-      );
-      if (!session) continue;
+    if (cachedServerUuid) {
+      const params = serverParams[cachedServerUuid];
+      if (params) {
+        const session = await mcpServerPool.getSession(
+          context.sessionId,
+          cachedServerUuid,
+          params,
+          context.namespaceUuid,
+        );
+        if (session?.client.getServerCapabilities()?.tools) {
+          const serverName =
+            params.name || session.client.getServerVersion()?.name || "";
+          if (sanitizeName(serverName) === serverPrefix) {
+            targetSession = session;
+            serverNameByUuid.set(
+              cachedServerUuid,
+              params.name || sanitizeName(serverName),
+            );
+          } else {
+            delete toolToServerUuid[name];
+          }
+        } else {
+          delete toolToServerUuid[name];
+        }
+      } else {
+        delete toolToServerUuid[name];
+      }
+    }
 
-      const capabilities = session.client.getServerCapabilities();
-      if (!capabilities?.tools) continue;
+    if (!targetSession) {
+      for (const [mcpServerUuid, params] of Object.entries(serverParams)) {
+        if (mcpServerUuid === cachedServerUuid) continue;
+        const session = await mcpServerPool.getSession(
+          context.sessionId,
+          mcpServerUuid,
+          params,
+          context.namespaceUuid,
+        );
+        if (!session) continue;
 
-      // Use name assigned by user, fallback to name from server
-      const serverName =
-        params.name || session.client.getServerVersion()?.name || "";
+        const capabilities = session.client.getServerCapabilities();
+        if (!capabilities?.tools) continue;
 
-      if (sanitizeName(serverName) === serverPrefix) {
+        const serverName =
+          params.name || session.client.getServerVersion()?.name || "";
+        if (sanitizeName(serverName) !== serverPrefix) continue;
+
         targetSession = session;
-        toolToClient[name] = session;
         toolToServerUuid[name] = mcpServerUuid;
+        serverNameByUuid.set(
+          mcpServerUuid,
+          params.name || sanitizeName(serverName),
+        );
         break;
       }
     }
@@ -151,16 +202,7 @@ export const createOriginalCallToolHandler = (): CallToolHandler => {
 
     try {
       // Get configurable timeout values to bypass MCP SDK default enforcement
-      const resetTimeoutOnProgress =
-        await configService.getMcpResetTimeoutOnProgress();
-      const timeout = await configService.getMcpTimeout();
-      const maxTotalTimeout = await configService.getMcpMaxTotalTimeout();
-
-      const mcpRequestOptions: RequestOptions = {
-        resetTimeoutOnProgress,
-        timeout,
-        maxTotalTimeout,
-      };
+      const mcpRequestOptions = await configService.getMcpExecutionConfig();
 
       // Use the correct schema for tool calls with timeout options
       const result = await targetSession.client.request(
@@ -207,8 +249,16 @@ export const createMiddlewareEnabledHandlers = (
   };
 
   // Create original handlers
-  const originalListToolsHandler = createOriginalListToolsHandler();
-  const originalCallToolHandler = createOriginalCallToolHandler();
+  const toolRoutingCache: ToolRoutingCache = {
+    toolToServerUuid: {},
+    serverNameByUuid: new Map(),
+  };
+  const originalListToolsHandler = createOriginalListToolsHandler(
+    false,
+    toolRoutingCache,
+  );
+  const originalCallToolHandler =
+    createOriginalCallToolHandler(toolRoutingCache);
 
   // Compose middleware with handlers
   const listToolsWithMiddleware = compose(
@@ -220,7 +270,12 @@ export const createMiddlewareEnabledHandlers = (
   )(originalListToolsHandler);
 
   const callToolWithMiddleware = compose(
-    createAuditCallToolMiddleware({ resolveToolIdentity }),
+    createAuditCallToolMiddleware({
+      resolveToolIdentity: createToolIdentityResolver(
+        toolRoutingCache.toolToServerUuid,
+        toolRoutingCache.serverNameByUuid,
+      ),
+    }),
     createFilterCallToolMiddleware({
       cacheEnabled: true,
       customErrorMessage: (toolName, reason) =>
