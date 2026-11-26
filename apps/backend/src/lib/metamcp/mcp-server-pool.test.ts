@@ -295,6 +295,39 @@ describe("McpServerPool connection accounting", () => {
     expect(pool.getPoolStatus().perServerCounts?.["server-a"]).toBe(0);
   });
 
+  it("invalidates only sessions leased to the affected server", async () => {
+    const pool = createPool(10, 1);
+    const serverAClient = makeClient();
+    const serverBClient = makeClient();
+    vi.mocked(connectMetaMcpClient).mockImplementation(async (params) =>
+      params.uuid === "server-a" ? serverAClient : serverBClient,
+    );
+
+    for (let index = 0; index < 1000; index += 1) {
+      const serverUuid = index % 2 === 0 ? "server-a" : "server-b";
+      await pool.getSession(
+        `session-${index}`,
+        serverUuid,
+        makeParams(serverUuid),
+      );
+    }
+
+    expect(pool.getPoolStatus().active).toBe(2);
+
+    await pool.invalidateServerConnection("session-0", "server-a");
+
+    expect(serverAClient.cleanup).toHaveBeenCalledTimes(1);
+    expect(serverBClient.cleanup).not.toHaveBeenCalled();
+    expect(pool.getPoolStatus().perServerCounts?.["server-a"]).toBe(0);
+    expect(pool.getPoolStatus().perServerCounts?.["server-b"]).toBe(1);
+
+    await pool.cleanupSession("session-0");
+    expect(serverAClient.cleanup).toHaveBeenCalledTimes(1);
+
+    await pool.cleanupAll();
+    expect(serverBClient.cleanup).toHaveBeenCalledTimes(1);
+  });
+
   it("invalidates a shared physical connection only once", async () => {
     const pool = createPool(10, 1);
     const client = makeClient();

@@ -60,7 +60,7 @@ import {
   ListToolsHandler,
   MetaMCPHandlerContext,
 } from "./metamcp-middleware/functional-middleware";
-import { resolveToolIdentity } from "./metamcp-middleware/tool-identity";
+import { createToolIdentityResolver } from "./metamcp-middleware/tool-identity";
 import {
   createToolOverridesCallToolMiddleware,
   createToolOverridesListToolsMiddleware,
@@ -191,9 +191,25 @@ export const createServer = async (
 ) => {
   const toolToClient: Record<string, ConnectedClient> = {};
   const toolToServerUuid: Record<string, string> = {};
+  const serverNameByUuid = new Map<string, string>();
+  const serverPrefixByUuid = new Map<string, string>();
   const promptToClient: Record<string, ConnectedClient> = {};
   const resourceToClient: Record<string, ConnectedClient> = {};
   const resourceToServerUuids: Record<string, Set<string>> = {};
+
+  const updateServerIdentityMaps = (
+    serverParams: Awaited<ReturnType<typeof getMcpServers>>,
+  ): void => {
+    serverNameByUuid.clear();
+    serverPrefixByUuid.clear();
+
+    for (const [serverUuid, params] of Object.entries(serverParams)) {
+      const serverName = params.name || serverUuid;
+      const serverPrefix = sanitizeName(serverName);
+      serverNameByUuid.set(serverUuid, serverName);
+      serverPrefixByUuid.set(serverUuid, serverPrefix);
+    }
+  };
 
   // Helper function to detect if a server is the same instance
   const isSameServerInstance = (
@@ -253,11 +269,10 @@ export const createServer = async (
       includeInactiveServers,
     );
     const serverEntries = Object.entries(serverParams);
+    updateServerIdentityMaps(serverParams);
     const serverUuids: string[] = [];
-    const serverNameByUuid = new Map<string, string>();
-    for (const [uuid, params] of serverEntries) {
+    for (const [uuid] of serverEntries) {
       serverUuids.push(uuid);
-      serverNameByUuid.set(uuid, sanitizeName(params.name || uuid));
     }
 
     // Serve the last successfully discovered tool definitions from Postgres.
@@ -277,7 +292,7 @@ export const createServer = async (
       : [];
 
     const allTools: Tool[] = persistedTools.map((stored) => {
-      const toolName = `${serverNameByUuid.get(stored.mcpServerUuid) || stored.mcpServerUuid}__${stored.name}`;
+      const toolName = `${serverPrefixByUuid.get(stored.mcpServerUuid) || stored.mcpServerUuid}__${stored.name}`;
       toolToServerUuid[toolName] = stored.mcpServerUuid;
       if (
         !handlerContext.toolPartition ||
@@ -427,6 +442,7 @@ export const createServer = async (
           namespaceUuid,
           includeInactiveServers,
         );
+        updateServerIdentityMaps(serverParams);
 
         // Extract forwarded headers for dynamic tool routing
         const forwardedHeadersByServer = context.clientRequestHeaders
@@ -546,10 +562,8 @@ export const createServer = async (
     const abortController = new AbortController();
 
     // Get configurable timeout values
-    const resetTimeoutOnProgress =
-      await configService.getMcpResetTimeoutOnProgress();
-    const timeout = await configService.getMcpTimeout();
-    const maxTotalTimeout = await configService.getMcpMaxTotalTimeout();
+    const { resetTimeoutOnProgress, timeout, maxTotalTimeout } =
+      await configService.getMcpExecutionConfig();
 
     const mcpRequestOptions: RequestOptions = {
       signal: abortController.signal,
@@ -641,7 +655,12 @@ export const createServer = async (
   )(originalListToolsHandler);
 
   const callToolWithMiddleware = compose(
-    createAuditCallToolMiddleware({ resolveToolIdentity }),
+    createAuditCallToolMiddleware({
+      resolveToolIdentity: createToolIdentityResolver(
+        toolToServerUuid,
+        serverNameByUuid,
+      ),
+    }),
     createFilterCallToolMiddleware({
       cacheEnabled: true,
       customErrorMessage: (toolName, reason) =>

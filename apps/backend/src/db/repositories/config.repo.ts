@@ -1,4 +1,5 @@
-import { eq } from "drizzle-orm";
+import type { ConfigKey } from "@repo/zod-types";
+import { eq, inArray } from "drizzle-orm";
 
 import { db } from "../index";
 import { configTable } from "../schema";
@@ -14,6 +15,17 @@ export const configRepo = {
       .from(configTable)
       .where(eq(configTable.id, id));
     return result[0];
+  },
+
+  async getConfigs(
+    ids: ConfigKey[],
+  ): Promise<
+    Array<{ id: string; value: string; description?: string | null }>
+  > {
+    return await db
+      .select()
+      .from(configTable)
+      .where(inArray(configTable.id, ids));
   },
 
   async setConfig(
