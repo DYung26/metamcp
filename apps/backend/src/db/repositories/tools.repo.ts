@@ -8,6 +8,8 @@ import { and, eq, notInArray, sql } from "drizzle-orm";
 import { db } from "../index";
 import { toolsTable } from "../schema";
 
+const TOOL_UPSERT_BATCH_SIZE = 500;
+
 export class ToolsRepository {
   async findByMcpServerUuid(mcpServerUuid: string): Promise<DatabaseTool[]> {
     return await db
@@ -24,40 +26,60 @@ export class ToolsRepository {
   }
 
   async bulkUpsert(input: ToolUpsertInput): Promise<DatabaseTool[]> {
-    if (!input.tools || input.tools.length === 0) {
-      return [];
+    return this.bulkUpsertMany([input]);
+  }
+
+  async bulkUpsertMany(
+    inputs: Array<Pick<ToolUpsertInput, "mcpServerUuid" | "tools">>,
+  ): Promise<DatabaseTool[]> {
+    const toolsToInsert: (typeof toolsTable.$inferInsert)[] = [];
+    for (const input of inputs) {
+      for (const tool of input.tools || []) {
+        toolsToInsert.push({
+          name: tool.name,
+          description: tool.description || "",
+          annotations: tool.annotations ?? null,
+          _meta: tool._meta ?? null,
+          toolSchema: {
+            type: "object" as const,
+            ...tool.inputSchema,
+          },
+          mcp_server_uuid: input.mcpServerUuid,
+        });
+      }
     }
 
-    // Format tools for database insertion
-    const toolsToInsert = input.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description || "",
-      annotations: tool.annotations ?? null,
-      _meta: tool._meta ?? null,
-      toolSchema: {
-        type: "object" as const,
-        ...tool.inputSchema,
-      },
-      mcp_server_uuid: input.mcpServerUuid,
-    }));
+    if (toolsToInsert.length === 0) return [];
 
-    // Batch insert all tools with upsert
-    const result = await db
-      .insert(toolsTable)
-      .values(toolsToInsert)
-      .onConflictDoUpdate({
-        target: [toolsTable.mcp_server_uuid, toolsTable.name],
-        set: {
-          description: sql`excluded.description`,
-          annotations: sql`excluded.annotations`,
-          _meta: sql`excluded._meta`,
-          toolSchema: sql`excluded.tool_schema`,
-          updated_at: new Date(),
-        },
-      })
-      .returning();
+    const upsertedTools: DatabaseTool[] = [];
+    const updatedAt = new Date();
+    for (
+      let offset = 0;
+      offset < toolsToInsert.length;
+      offset += TOOL_UPSERT_BATCH_SIZE
+    ) {
+      const batch = toolsToInsert.slice(
+        offset,
+        offset + TOOL_UPSERT_BATCH_SIZE,
+      );
+      const upsertedBatch = await db
+        .insert(toolsTable)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [toolsTable.mcp_server_uuid, toolsTable.name],
+          set: {
+            description: sql`excluded.description`,
+            annotations: sql`excluded.annotations`,
+            _meta: sql`excluded._meta`,
+            toolSchema: sql`excluded.tool_schema`,
+            updated_at: updatedAt,
+          },
+        })
+        .returning();
+      upsertedTools.push(...upsertedBatch);
+    }
 
-    return result;
+    return upsertedTools;
   }
 
   async findByUuid(uuid: string): Promise<DatabaseTool | undefined> {

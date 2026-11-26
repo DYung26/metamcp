@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToolsSyncCache } from "./tools-sync-cache";
 
@@ -99,6 +99,14 @@ describe("ToolsSyncCache", () => {
   });
 
   describe("shouldSync", () => {
+    it("hashes each tool snapshot only once", () => {
+      const hashTools = vi.spyOn(cache, "hashTools");
+
+      cache.shouldSync("server-uuid-1", ["tool1", "tool2"]);
+
+      expect(hashTools).toHaveBeenCalledTimes(1);
+    });
+
     it("should return true and update cache on first call", () => {
       const tools = ["tool1", "tool2"];
       const serverUuid = "server-uuid-1";

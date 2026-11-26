@@ -7,7 +7,12 @@ function limitToolsFairly<T extends NamedTool>(tools: T[], limit: number): T[] {
   for (const tool of tools) {
     const separator = tool.name.indexOf("__");
     const key = separator > 0 ? tool.name.slice(0, separator) : "_meta";
-    groups.set(key, [...(groups.get(key) || []), tool]);
+    let group = groups.get(key);
+    if (!group) {
+      group = [];
+      groups.set(key, group);
+    }
+    group.push(tool);
   }
 
   const queues = [...groups.entries()]
@@ -17,18 +22,19 @@ function limitToolsFairly<T extends NamedTool>(tools: T[], limit: number): T[] {
       index: 0,
     }));
   const selected: T[] = [];
+  let activeQueueCount = queues.length;
 
-  while (selected.length < limit) {
-    let added = false;
-    for (const queue of queues) {
-      const tool = queue.items[queue.index];
-      if (!tool) continue;
-      selected.push(tool);
-      queue.index += 1;
-      added = true;
+  while (selected.length < limit && activeQueueCount > 0) {
+    let nextActiveQueueCount = 0;
+    for (let queueIndex = 0; queueIndex < activeQueueCount; queueIndex++) {
+      const queue = queues[queueIndex];
+      selected.push(queue.items[queue.index++]);
+      if (queue.index < queue.items.length) {
+        queues[nextActiveQueueCount++] = queue;
+      }
       if (selected.length === limit) break;
     }
-    if (!added) break;
+    activeQueueCount = nextActiveQueueCount;
   }
 
   return selected;

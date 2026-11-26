@@ -1,6 +1,7 @@
 import {
   CreateNamespaceRequestSchema,
   CreateNamespaceResponseSchema,
+  type DatabaseMcpServer,
   DeleteNamespaceResponseSchema,
   GetNamespaceResponseSchema,
   GetNamespaceToolsRequestSchema,
@@ -28,9 +29,10 @@ import {
   toolsRepository,
 } from "../db/repositories";
 import { NamespacesSerializer } from "../db/serializers";
+import { clearFilterCache } from "../lib/metamcp/metamcp-middleware/filter-tools.functional";
 import {
   clearOverrideCache,
-  mapOverrideNameToOriginal,
+  mapOverrideNamesToOriginal,
 } from "../lib/metamcp/metamcp-middleware/tool-overrides.functional";
 import { metaMcpServerPool } from "../lib/metamcp/metamcp-server-pool";
 
@@ -277,6 +279,8 @@ export const namespacesImplementations = {
         };
       }
 
+      clearFilterCache(input.uuid);
+
       // Clean up idle MetaMCP server for the deleted namespace
       try {
         await metaMcpServerPool.cleanupIdleServer(input.uuid);
@@ -388,6 +392,10 @@ export const namespacesImplementations = {
         user_id: input.user_id,
         mcpServerUuids: input.mcpServerUuids,
       });
+
+      if (input.mcpServerUuids !== undefined) {
+        clearFilterCache(input.uuid);
+      }
 
       // Invalidate idle MetaMCP server for this namespace since the MCP servers list may have changed
       // Run this asynchronously to avoid blocking the response
@@ -572,6 +580,8 @@ export const namespacesImplementations = {
         };
       }
 
+      clearFilterCache(input.namespaceUuid);
+
       return {
         success: true as const,
         message: "Tool status updated successfully",
@@ -685,9 +695,13 @@ export const namespacesImplementations = {
         };
       }
 
-      // Parse tool names to extract server names and actual tool names
-      // Important: The input tools may have overridden names applied by MetaMCP middleware
-      // We need to map them back to original names to avoid overwriting original names in the database
+      // Resolve all override names in one query before parsing the tool list.
+      const originalNamesByTool = await mapOverrideNamesToOriginal(
+        input.tools.map((tool) => tool.name),
+        input.namespaceUuid,
+      );
+
+      // Parse tool names to extract server names and actual tool names.
       const parsedTools: Array<{
         serverName: string;
         toolName: string;
@@ -709,29 +723,15 @@ export const namespacesImplementations = {
         const serverName = tool.name.substring(0, lastDoubleUnderscoreIndex);
         const toolName = tool.name.substring(lastDoubleUnderscoreIndex + 2);
 
-        // Check if this tool name might be an override name by looking up the original name
-        // If it is an override name, skip this tool entirely to avoid duplicates
-        try {
-          const fullToolName = `${serverName}__${toolName}`;
-          const originalToolName = await mapOverrideNameToOriginal(
-            fullToolName,
-            input.namespaceUuid,
+        // Skip override aliases to avoid creating duplicate database tools.
+        const fullToolName = `${serverName}__${toolName}`;
+        const originalToolName =
+          originalNamesByTool.get(fullToolName) ?? fullToolName;
+        if (originalToolName !== fullToolName) {
+          logger.info(
+            `Skipping override tool "${fullToolName}" as it maps to original "${originalToolName}"`,
           );
-
-          // If we found an original name mapping, this means the current toolName is an override
-          // Skip this tool to avoid creating duplicates
-          if (originalToolName !== fullToolName) {
-            logger.info(
-              `Skipping override tool "${fullToolName}" as it maps to original "${originalToolName}"`,
-            );
-            continue;
-          }
-        } catch (error) {
-          // If mapping fails, continue with the parsed name (it's likely an original tool)
-          logger.warn(
-            `Failed to map override name for tool "${toolName}":`,
-            error,
-          );
+          continue;
         }
 
         if (!serverName || !toolName) {
@@ -769,11 +769,17 @@ export const namespacesImplementations = {
         }
       > = {};
 
+      const serverByName = new Map<string, DatabaseMcpServer | null>();
+      const findServerByName = async (name: string) => {
+        if (serverByName.has(name)) return serverByName.get(name) ?? null;
+        const server = (await mcpServersRepository.findByName(name)) ?? null;
+        serverByName.set(name, server);
+        return server;
+      };
+
       for (const parsedTool of parsedTools) {
         // Find server by name - first try exact match
-        let server = await mcpServersRepository.findByName(
-          parsedTool.serverName,
-        );
+        let server = await findServerByName(parsedTool.serverName);
 
         // If exact match fails, try to handle nested MetaMCP scenarios
         // For nested MetaMCP, tool names may be in format "ParentServer__ChildServer__tool"
@@ -787,7 +793,7 @@ export const namespacesImplementations = {
             firstDoubleUnderscoreIndex,
           );
 
-          server = await mcpServersRepository.findByName(actualServerName);
+          server = await findServerByName(actualServerName);
 
           if (server) {
             logger.info(
@@ -830,46 +836,35 @@ export const namespacesImplementations = {
         };
       }
 
-      let totalToolsCreated = 0;
-      let totalMappingsCreated = 0;
-
-      // Process tools for each server
-      for (const [serverName, serverData] of Object.entries(
-        toolsByServerName,
-      )) {
-        const { serverUuid, tools } = serverData;
-
-        // Bulk upsert tools to the tools table with the actual tool names
-        const upsertedTools = await toolsRepository.bulkUpsert({
+      const serverGroups = Object.values(toolsByServerName);
+      const upsertedTools = await toolsRepository.bulkUpsertMany(
+        serverGroups.map(({ serverUuid, tools }) => ({
           mcpServerUuid: serverUuid,
           tools: tools.map((tool) => ({
-            name: tool.toolName, // Use the actual tool name, not the prefixed name
+            name: tool.toolName,
             description: tool.description,
             inputSchema: tool.inputSchema,
           })),
+        })),
+      );
+      const totalToolsCreated = upsertedTools.length;
+
+      const toolMappings = upsertedTools.map((tool) => ({
+        toolUuid: tool.uuid,
+        serverUuid: tool.mcp_server_uuid,
+        status: "ACTIVE" as const,
+      }));
+      const createdMappings =
+        await namespaceMappingsRepository.bulkUpsertNamespaceToolMappings({
+          namespaceUuid: input.namespaceUuid,
+          toolMappings,
         });
+      const totalMappingsCreated = createdMappings.length;
+      clearFilterCache(input.namespaceUuid);
 
-        totalToolsCreated += upsertedTools.length;
-
-        // Create namespace tool mappings
-        const toolMappings = upsertedTools.map((tool) => ({
-          toolUuid: tool.uuid,
-          serverUuid: serverUuid,
-          status: "ACTIVE" as const,
-        }));
-
-        const createdMappings =
-          await namespaceMappingsRepository.bulkUpsertNamespaceToolMappings({
-            namespaceUuid: input.namespaceUuid,
-            toolMappings,
-          });
-
-        totalMappingsCreated += createdMappings.length;
-
-        logger.info(
-          `Processed ${tools.length} tools for server "${serverName}" (${serverUuid})`,
-        );
-      }
+      logger.info(
+        `Processed ${totalToolsCreated} tools across ${serverGroups.length} servers`,
+      );
 
       // Invalidate idle MetaMCP server for this namespace since tools were refreshed
       // Run this asynchronously to avoid blocking the response

@@ -11,6 +11,8 @@ import {
   namespaceToolMappingsTable,
 } from "../schema";
 
+const NAMESPACE_TOOL_MAPPING_BATCH_SIZE = 1000;
+
 export class NamespaceMappingsRepository {
   async updateServerStatus(input: NamespaceServerStatusUpdate) {
     const [updatedMapping] = await db
@@ -29,7 +31,9 @@ export class NamespaceMappingsRepository {
     return updatedMapping;
   }
 
-  async updateToolStatus(input: NamespaceToolStatusUpdate) {
+  async updateToolStatus(
+    input: NamespaceToolStatusUpdate,
+  ): Promise<typeof namespaceToolMappingsTable.$inferSelect | undefined> {
     const [updatedMapping] = await db
       .update(namespaceToolMappingsTable)
       .set({
@@ -150,21 +154,35 @@ export class NamespaceMappingsRepository {
       status: (mapping.status || "ACTIVE") as "ACTIVE" | "INACTIVE",
     }));
 
-    // Upsert the mappings - if they exist, update the status; if not, insert them
-    return await db
-      .insert(namespaceToolMappingsTable)
-      .values(mappingsToInsert)
-      .onConflictDoUpdate({
-        target: [
-          namespaceToolMappingsTable.namespace_uuid,
-          namespaceToolMappingsTable.tool_uuid,
-        ],
-        set: {
-          status: sql`excluded.status`,
-          mcp_server_uuid: sql`excluded.mcp_server_uuid`,
-        },
-      })
-      .returning();
+    const upsertedMappings: (typeof namespaceToolMappingsTable.$inferSelect)[] =
+      [];
+    for (
+      let offset = 0;
+      offset < mappingsToInsert.length;
+      offset += NAMESPACE_TOOL_MAPPING_BATCH_SIZE
+    ) {
+      const batch = mappingsToInsert.slice(
+        offset,
+        offset + NAMESPACE_TOOL_MAPPING_BATCH_SIZE,
+      );
+      const upsertedBatch = await db
+        .insert(namespaceToolMappingsTable)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [
+            namespaceToolMappingsTable.namespace_uuid,
+            namespaceToolMappingsTable.tool_uuid,
+          ],
+          set: {
+            status: sql`excluded.status`,
+            mcp_server_uuid: sql`excluded.mcp_server_uuid`,
+          },
+        })
+        .returning();
+      upsertedMappings.push(...upsertedBatch);
+    }
+
+    return upsertedMappings;
   }
 }
 

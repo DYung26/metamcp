@@ -11,6 +11,27 @@ function tools(prefix: string, count: number): TestTool[] {
 }
 
 describe("prioritizeAdminTools", () => {
+  it("keeps round-robin ordering when shorter namespace queues are exhausted", () => {
+    const namespaceTools = [
+      { name: "zeta__tool_02" },
+      { name: "alpha__tool_02" },
+      { name: "alpha__tool_01" },
+      { name: "alpha__tool_03" },
+      { name: "beta__tool_01" },
+      { name: "zeta__tool_01" },
+    ];
+
+    const result = prioritizeAdminTools(namespaceTools, [], 5);
+
+    expect(result.map((tool) => tool.name)).toEqual([
+      "alpha__tool_01",
+      "beta__tool_01",
+      "zeta__tool_01",
+      "alpha__tool_02",
+      "zeta__tool_02",
+    ]);
+  });
+
   it("places every admin tool before namespace tools and reserves their slots", () => {
     const adminTools = tools("metamcp-admin", 3);
     const namespaceTools = [...tools("alpha", 10), ...tools("beta", 10)];

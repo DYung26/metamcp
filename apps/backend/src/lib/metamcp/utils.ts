@@ -1,4 +1,8 @@
-import { DatabaseMcpServer, ServerParameters } from "@repo/zod-types";
+import type {
+  DatabaseMcpServer,
+  DatabaseOAuthSession,
+  ServerParameters,
+} from "@repo/zod-types";
 
 import logger from "@/utils/logger";
 
@@ -80,16 +84,20 @@ export function sanitizeName(name: string): string {
 /**
  * Converts a database MCP server record to ServerParameters format
  * @param server Database MCP server record
+ * @param oauthSessionOverride Preloaded session. `undefined` triggers a lookup;
+ *   `null` means no session exists.
  * @returns ServerParameters object or null if conversion fails
  */
 export async function convertDbServerToParams(
   server: DatabaseMcpServer,
+  oauthSessionOverride?: DatabaseOAuthSession | null,
 ): Promise<ServerParameters | null> {
   try {
-    // Fetch OAuth tokens from OAuth sessions table
-    const oauthSession = await oauthSessionsRepository.findByMcpServerUuid(
-      server.uuid,
-    );
+    // Fetch OAuth tokens unless the caller already loaded them in a batch.
+    const oauthSession =
+      oauthSessionOverride === undefined
+        ? await oauthSessionsRepository.findByMcpServerUuid(server.uuid)
+        : oauthSessionOverride;
     let oauthTokens = null;
 
     if (oauthSession && oauthSession.tokens) {
@@ -148,6 +156,55 @@ export async function convertDbServerToParams(
     );
     return null;
   }
+}
+
+/**
+ * Convert multiple servers using one OAuth-session query instead of one query
+ * per server.
+ */
+export async function convertDbServersToParams(
+  servers: DatabaseMcpServer[],
+): Promise<Record<string, ServerParameters>> {
+  if (servers.length === 0) return {};
+
+  let oauthSessions: DatabaseOAuthSession[];
+  try {
+    oauthSessions = await oauthSessionsRepository.findByMcpServerUuids(
+      servers.map((server) => server.uuid),
+    );
+  } catch (error) {
+    logger.error(
+      "Error fetching OAuth sessions in batch; falling back to individual lookups:",
+      error,
+    );
+    const fallbackParams: Record<string, ServerParameters> = {};
+    for (const server of servers) {
+      const params = await convertDbServerToParams(server);
+      if (params) fallbackParams[server.uuid] = params;
+    }
+    return fallbackParams;
+  }
+
+  const oauthSessionByServer = new Map<string, DatabaseOAuthSession>();
+  for (const session of oauthSessions) {
+    oauthSessionByServer.set(session.mcp_server_uuid, session);
+  }
+
+  const convertedServers = await Promise.all(
+    servers.map((server) =>
+      convertDbServerToParams(
+        server,
+        oauthSessionByServer.get(server.uuid) ?? null,
+      ),
+    ),
+  );
+  const serverParams: Record<string, ServerParameters> = {};
+  for (let index = 0; index < servers.length; index++) {
+    const params = convertedServers[index];
+    if (params) serverParams[servers[index].uuid] = params;
+  }
+
+  return serverParams;
 }
 
 /**

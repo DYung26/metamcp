@@ -127,6 +127,20 @@ export class McpServersRepository {
     return server;
   }
 
+  async findByTypeAndUrl(
+    type: DatabaseMcpServer["type"],
+    url: string,
+  ): Promise<DatabaseMcpServer | undefined> {
+    const [server] = await db
+      .select()
+      .from(mcpServersTable)
+      .where(and(eq(mcpServersTable.type, type), eq(mcpServersTable.url, url)))
+      .orderBy(desc(mcpServersTable.created_at))
+      .limit(1);
+
+    return server;
+  }
+
   async findByName(name: string): Promise<DatabaseMcpServer | undefined> {
     const [server] = await db
       .select()

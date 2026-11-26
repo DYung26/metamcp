@@ -158,15 +158,16 @@ async function filterOutOverrideTools(
         ),
       );
 
-    const overrideNames = new Set(
-      mappings
-        .filter(
-          (mapping) =>
-            !!mapping.overrideName &&
-            mapping.overrideName !== mapping.originalName,
-        )
-        .map((mapping) => mapping.overrideName as string),
-    );
+    const overrideNames = new Set<string>();
+    for (const mapping of mappings) {
+      if (
+        mapping.overrideName &&
+        mapping.overrideName !== mapping.originalName
+      ) {
+        overrideNames.add(mapping.overrideName);
+      }
+    }
+    if (overrideNames.size === 0) return tools;
     return tools.filter((tool) => !overrideNames.has(tool.name));
   } catch (error) {
     logger.error(
@@ -252,12 +253,12 @@ export const createServer = async (
       includeInactiveServers,
     );
     const serverEntries = Object.entries(serverParams);
-    const serverNameByUuid = new Map(
-      serverEntries.map(([uuid, params]) => [
-        uuid,
-        sanitizeName(params.name || uuid),
-      ]),
-    );
+    const serverUuids: string[] = [];
+    const serverNameByUuid = new Map<string, string>();
+    for (const [uuid, params] of serverEntries) {
+      serverUuids.push(uuid);
+      serverNameByUuid.set(uuid, sanitizeName(params.name || uuid));
+    }
 
     // Serve the last successfully discovered tool definitions from Postgres.
     // Listing tools must not require opening every upstream backend connection.
@@ -272,12 +273,7 @@ export const createServer = async (
             mcpServerUuid: toolsTable.mcp_server_uuid,
           })
           .from(toolsTable)
-          .where(
-            inArray(
-              toolsTable.mcp_server_uuid,
-              serverEntries.map(([uuid]) => uuid),
-            ),
-          )
+          .where(inArray(toolsTable.mcp_server_uuid, serverUuids))
       : [];
 
     const allTools: Tool[] = persistedTools.map((stored) => {
@@ -366,7 +362,8 @@ export const createServer = async (
                     );
                   }
                 }
-                if (toolsSyncCache.hasChanged(serverUuid, discovered)) {
+                const discoveredHash = toolsSyncCache.hashTools(discovered);
+                if (toolsSyncCache.hasHashChanged(serverUuid, discoveredHash)) {
                   const toolsToSave = await filterOutOverrideTools(
                     discovered,
                     namespaceUuid,
@@ -379,7 +376,9 @@ export const createServer = async (
                     });
                     if (!sync.success) return;
                   }
-                  toolsSyncCache.update(serverUuid, discovered);
+                  // Preserve the full discovery snapshot; the DB sync may use a
+                  // filtered tool list.
+                  toolsSyncCache.updateHash(serverUuid, discoveredHash);
                 }
               } catch (error) {
                 logger.warn(

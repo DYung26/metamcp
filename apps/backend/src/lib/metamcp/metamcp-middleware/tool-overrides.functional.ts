@@ -1,5 +1,5 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, or } from "drizzle-orm";
 
 import logger from "@/utils/logger";
 
@@ -21,16 +21,6 @@ import {
 export interface ToolOverridesConfig {
   cacheEnabled?: boolean;
   cacheTTL?: number; // milliseconds
-}
-
-/**
- * Tool override information
- */
-interface ToolOverride {
-  overrideName?: string | null;
-  overrideTitle?: string | null;
-  overrideDescription?: string | null;
-  overrideAnnotations?: Record<string, unknown> | null;
 }
 
 function mergeAnnotations(
@@ -59,22 +49,40 @@ function mergeAnnotations(
 class ToolOverridesCache {
   private reverseNameCache = new Map<string, string>();
 
-  private getReverseKey(namespaceUuid: string, overrideName: string): string {
-    return namespaceUuid + ":" + overrideName;
+  private getReverseKey(
+    namespaceUuid: string,
+    exposedToolName: string,
+  ): string {
+    return namespaceUuid + ":" + exposedToolName;
   }
 
-  getOriginalName(namespaceUuid: string, overrideName: string): string | null {
-    return this.reverseNameCache.get(this.getReverseKey(namespaceUuid, overrideName)) || null;
+  getOriginalName(
+    namespaceUuid: string,
+    exposedToolName: string,
+  ): string | null {
+    return (
+      this.reverseNameCache.get(
+        this.getReverseKey(namespaceUuid, exposedToolName),
+      ) || null
+    );
   }
 
-  setOriginalName(namespaceUuid: string, overrideName: string, originalName: string): void {
-    this.reverseNameCache.set(this.getReverseKey(namespaceUuid, overrideName), originalName);
+  setOriginalName(
+    namespaceUuid: string,
+    exposedToolName: string,
+    originalName: string,
+  ): void {
+    this.reverseNameCache.set(
+      this.getReverseKey(namespaceUuid, exposedToolName),
+      originalName,
+    );
   }
 
   clear(namespaceUuid?: string): void {
     if (namespaceUuid) {
       for (const key of this.reverseNameCache.keys()) {
-        if (key.startsWith(namespaceUuid + ":")) this.reverseNameCache.delete(key);
+        if (key.startsWith(namespaceUuid + ":"))
+          this.reverseNameCache.delete(key);
       }
     } else {
       this.reverseNameCache.clear();
@@ -115,50 +123,74 @@ async function applyToolOverrides(
         overrideAnnotations: namespaceToolMappingsTable.override_annotations,
       })
       .from(namespaceToolMappingsTable)
-      .innerJoin(toolsTable, eq(toolsTable.uuid, namespaceToolMappingsTable.tool_uuid))
-      .innerJoin(mcpServersTable, eq(mcpServersTable.uuid, namespaceToolMappingsTable.mcp_server_uuid))
-      .where(eq(namespaceToolMappingsTable.namespace_uuid, namespaceUuid));
+      .innerJoin(
+        toolsTable,
+        eq(toolsTable.uuid, namespaceToolMappingsTable.tool_uuid),
+      )
+      .innerJoin(
+        mcpServersTable,
+        eq(mcpServersTable.uuid, namespaceToolMappingsTable.mcp_server_uuid),
+      )
+      .where(
+        and(
+          eq(namespaceToolMappingsTable.namespace_uuid, namespaceUuid),
+          or(
+            isNotNull(namespaceToolMappingsTable.override_name),
+            isNotNull(namespaceToolMappingsTable.override_title),
+            isNotNull(namespaceToolMappingsTable.override_description),
+            isNotNull(namespaceToolMappingsTable.override_annotations),
+          ),
+        ),
+      );
   } catch (error) {
-    logger.error("Error fetching tool overrides for namespace " + namespaceUuid + ":", error);
+    logger.error(
+      "Error fetching tool overrides for namespace " + namespaceUuid + ":",
+      error,
+    );
     return tools;
   }
-  const overridesByName = new Map<string, (typeof mappings)[number]>(
-    mappings.map(
-      (mapping) => [mapping.serverName + "__" + mapping.toolName, mapping] as const,
-    ),
-  );
+  if (mappings.length === 0) return tools;
+  const overridesByName = new Map<string, (typeof mappings)[number]>();
+  for (const mapping of mappings) {
+    overridesByName.set(`${mapping.serverName}__${mapping.toolName}`, mapping);
+  }
   return tools.map((tool) => {
-    const parsed = parseToolName(tool.name);
-    if (!parsed) return tool;
     const mapping = overridesByName.get(tool.name);
     if (!mapping) return tool;
-    const override: ToolOverride = {
-      overrideName: mapping.overrideName,
-      overrideTitle: mapping.overrideTitle,
-      overrideDescription: mapping.overrideDescription,
-      overrideAnnotations: mapping.overrideAnnotations,
-    };
+    const parsed = parseToolName(tool.name);
+    if (!parsed) return tool;
     const overriddenName =
-      override.overrideName && override.overrideName.trim() !== ""
-        ? parsed.serverName + "__" + override.overrideName
+      mapping.overrideName && mapping.overrideName.trim() !== ""
+        ? parsed.serverName + "__" + mapping.overrideName
         : tool.name;
     const overriddenDescription =
-      override.overrideDescription !== null ? override.overrideDescription : tool.description;
+      mapping.overrideDescription !== null
+        ? mapping.overrideDescription
+        : tool.description;
     let overriddenTitle: string | undefined = tool.title;
-    if (typeof override.overrideTitle !== "undefined") {
-      overriddenTitle = override.overrideTitle === null ? undefined : override.overrideTitle;
+    if (typeof mapping.overrideTitle !== "undefined") {
+      overriddenTitle =
+        mapping.overrideTitle === null ? undefined : mapping.overrideTitle;
     }
-    let overriddenAnnotations =
-      tool.annotations && Object.keys(tool.annotations).length > 0
-        ? { ...tool.annotations }
-        : undefined;
-    if (overriddenAnnotations && "title" in overriddenAnnotations) {
-      const { title: _removed, ...rest } = overriddenAnnotations;
-      overriddenAnnotations = Object.keys(rest).length > 0 ? rest : undefined;
+    let overriddenAnnotations = tool.annotations;
+    if (overriddenAnnotations) {
+      if (Object.keys(overriddenAnnotations).length === 0) {
+        overriddenAnnotations = undefined;
+      } else if ("title" in overriddenAnnotations) {
+        const { title: _removed, ...rest } = overriddenAnnotations;
+        overriddenAnnotations = Object.keys(rest).length > 0 ? rest : undefined;
+      }
     }
-    overriddenAnnotations = mergeAnnotations(overriddenAnnotations, override.overrideAnnotations);
-    if (override.overrideName && useCache) {
-      toolOverridesCache.setOriginalName(namespaceUuid, override.overrideName, tool.name);
+    overriddenAnnotations = mergeAnnotations(
+      overriddenAnnotations,
+      mapping.overrideAnnotations,
+    );
+    if (mapping.overrideName && useCache) {
+      toolOverridesCache.setOriginalName(
+        namespaceUuid,
+        overriddenName,
+        tool.name,
+      );
     }
     return {
       ...tool,
@@ -185,11 +217,11 @@ export async function mapOverrideNameToOriginal(
     return toolName;
   }
 
-  // First check if this might be an override name using just the tool part
+  // Check the fully qualified exposed name to avoid cross-server collisions.
   if (useCache) {
     const originalName = toolOverridesCache.getOriginalName(
       namespaceUuid,
-      parsed.originalToolName,
+      toolName,
     );
     if (originalName) {
       return originalName;
@@ -223,11 +255,11 @@ export async function mapOverrideNameToOriginal(
     if (toolMapping) {
       const originalFullName = `${toolMapping.serverName}__${toolMapping.originalName}`;
 
-      // Cache the reverse mapping using the tool part only
+      // Cache the reverse mapping by its fully qualified exposed name
       if (useCache) {
         toolOverridesCache.setOriginalName(
           namespaceUuid,
-          parsed.originalToolName,
+          toolName,
           originalFullName,
         );
       }
@@ -243,6 +275,100 @@ export async function mapOverrideNameToOriginal(
 
   // If no mapping found, return the original name
   return toolName;
+}
+
+/**
+ * Resolve multiple exposed tool names with one namespace-scoped database query.
+ * Names without an override mapping are returned unchanged.
+ */
+export async function mapOverrideNamesToOriginal(
+  toolNames: string[],
+  namespaceUuid: string,
+): Promise<Map<string, string>> {
+  const originalNames = new Map<string, string>();
+  const parsedTools: Array<{
+    fullName: string;
+    serverName: string;
+    originalToolName: string;
+  }> = [];
+
+  for (const fullName of toolNames) {
+    const parsed = parseToolName(fullName);
+    if (!parsed) {
+      originalNames.set(fullName, fullName);
+      continue;
+    }
+    const cachedOriginalName = toolOverridesCache.getOriginalName(
+      namespaceUuid,
+      fullName,
+    );
+    if (cachedOriginalName) {
+      originalNames.set(fullName, cachedOriginalName);
+      continue;
+    }
+    parsedTools.push({ fullName, ...parsed });
+  }
+
+  if (parsedTools.length === 0) return originalNames;
+
+  try {
+    const mappings = await db
+      .select({
+        originalName: toolsTable.name,
+        serverName: mcpServersTable.name,
+        overrideName: namespaceToolMappingsTable.override_name,
+      })
+      .from(namespaceToolMappingsTable)
+      .innerJoin(
+        toolsTable,
+        eq(toolsTable.uuid, namespaceToolMappingsTable.tool_uuid),
+      )
+      .innerJoin(
+        mcpServersTable,
+        eq(mcpServersTable.uuid, namespaceToolMappingsTable.mcp_server_uuid),
+      )
+      .where(
+        and(
+          eq(namespaceToolMappingsTable.namespace_uuid, namespaceUuid),
+          isNotNull(namespaceToolMappingsTable.override_name),
+        ),
+      );
+
+    const originalByOverrideName = new Map<string, string>();
+    for (const mapping of mappings) {
+      if (!mapping.overrideName) continue;
+      const overrideFullName = `${mapping.serverName}__${mapping.overrideName}`;
+      if (!originalByOverrideName.has(overrideFullName)) {
+        originalByOverrideName.set(
+          overrideFullName,
+          `${mapping.serverName}__${mapping.originalName}`,
+        );
+      }
+    }
+
+    for (const parsed of parsedTools) {
+      const originalName =
+        originalByOverrideName.get(parsed.fullName) ?? parsed.fullName;
+      originalNames.set(parsed.fullName, originalName);
+      if (originalName !== parsed.fullName) {
+        toolOverridesCache.setOriginalName(
+          namespaceUuid,
+          parsed.fullName,
+          originalName,
+        );
+      }
+    }
+  } catch (error) {
+    logger.error(
+      `Error mapping tool override names for namespace ${namespaceUuid}:`,
+      error,
+    );
+    for (const parsed of parsedTools) {
+      originalNames.set(parsed.fullName, parsed.fullName);
+    }
+  }
+
+  return originalNames;
 }
 
 /**

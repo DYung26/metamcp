@@ -42,6 +42,11 @@ export class McpServerPool {
   // Active sessions: sessionId -> Record<serverUuid, ConnectedClient>
   private activeSessions: Record<string, Record<string, ConnectedClient>> = {};
 
+  // Indexed active clients avoid scanning every session on each capacity check.
+  // A client may be leased by multiple sessions, but is counted only once.
+  private activeClients = new Set<ConnectedClient>();
+  private activeClientsByServer = new Map<string, Set<ConnectedClient>>();
+
   // Mapping: sessionId -> Set<serverUuid> for cleanup tracking
   private sessionToServers: Record<string, Set<string>> = {};
 
@@ -122,19 +127,40 @@ export class McpServerPool {
     return McpServerPool.instance;
   }
 
+  private addActiveConnection(
+    serverUuid: string,
+    client: ConnectedClient,
+  ): void {
+    let clients = this.activeClientsByServer.get(serverUuid);
+    if (!clients) {
+      clients = new Set();
+      this.activeClientsByServer.set(serverUuid, clients);
+    }
+    clients.add(client);
+    this.activeClients.add(client);
+  }
+
+  private removeActiveConnection(
+    serverUuid: string,
+    client: ConnectedClient,
+  ): void {
+    const clients = this.activeClientsByServer.get(serverUuid);
+    if (!clients) return;
+    clients.delete(client);
+    if (clients.size === 0) this.activeClientsByServer.delete(serverUuid);
+    this.activeClients.delete(client);
+  }
+
   /**
-   * Count all connections (idle + active + pending) for a specific server UUID
+   * Count all connections (idle + active + pending) for a specific server UUID.
+   * Indexed sets make this O(1), independent of the number of active sessions.
    */
   private countConnectionsForServer(serverUuid: string): number {
-    // Count unique physical clients, not their session-map references.
-    const clients = new Set<ConnectedClient>();
-    const idleClient = this.idleSessions[serverUuid];
-    if (idleClient) clients.add(idleClient);
-    for (const sessionServers of Object.values(this.activeSessions)) {
-      const client = sessionServers[serverUuid];
-      if (client) clients.add(client);
-    }
-    return clients.size + (this.pendingConnectionCounts.get(serverUuid) ?? 0);
+    return (
+      (this.activeClientsByServer.get(serverUuid)?.size ?? 0) +
+      (this.idleSessions[serverUuid] ? 1 : 0) +
+      (this.pendingConnectionCounts.get(serverUuid) ?? 0)
+    );
   }
 
   private retainConnection(client: ConnectedClient): void {
@@ -195,30 +221,14 @@ export class McpServerPool {
   }
 
   /**
-   * Find the oldest active connection for a server UUID (for reuse when at cap)
+   * Return the oldest active physical connection for reuse when at the cap.
+   * Set insertion order is connection creation order, so this is O(1) rather
+   * than scanning every session that may lease the same physical client.
    */
   private findOldestActiveConnectionForServer(
     serverUuid: string,
   ): ConnectedClient | undefined {
-    let oldestSessionId: string | undefined;
-    let oldestTimestamp = Infinity;
-
-    for (const [sessionId, sessionServers] of Object.entries(
-      this.activeSessions,
-    )) {
-      if (sessionServers[serverUuid]) {
-        const timestamp = this.sessionTimestamps[sessionId] || Infinity;
-        if (timestamp < oldestTimestamp) {
-          oldestTimestamp = timestamp;
-          oldestSessionId = sessionId;
-        }
-      }
-    }
-
-    if (oldestSessionId) {
-      return this.activeSessions[oldestSessionId]?.[serverUuid];
-    }
-    return undefined;
+    return this.activeClientsByServer.get(serverUuid)?.values().next().value;
   }
 
   /**
@@ -257,6 +267,7 @@ export class McpServerPool {
         delete this.idleSessions[serverUuid];
         this.connectionRefCounts.set(idleClient, 1);
         this.activeSessions[sessionId][serverUuid] = idleClient;
+        this.addActiveConnection(serverUuid, idleClient);
         this.sessionToServers[sessionId].add(serverUuid);
 
         logger.info(
@@ -301,6 +312,7 @@ export class McpServerPool {
           }
           if (isIdleClient || hasActiveLease) {
             this.activeSessions[sessionId][serverUuid] = pendingClient;
+            this.addActiveConnection(serverUuid, pendingClient);
             this.sessionToServers[sessionId].add(serverUuid);
             return pendingClient;
           }
@@ -323,6 +335,7 @@ export class McpServerPool {
         );
         this.retainConnection(reusable);
         this.activeSessions[sessionId][serverUuid] = reusable;
+        this.addActiveConnection(serverUuid, reusable);
         this.sessionToServers[sessionId].add(serverUuid);
         return reusable;
       }
@@ -356,6 +369,7 @@ export class McpServerPool {
       if (reusable) {
         this.retainConnection(reusable);
         this.activeSessions[sessionId][serverUuid] = reusable;
+        this.addActiveConnection(serverUuid, reusable);
         this.sessionToServers[sessionId].add(serverUuid);
         return reusable;
       }
@@ -390,6 +404,7 @@ export class McpServerPool {
 
     this.connectionRefCounts.set(newClient, 1);
     this.activeSessions[sessionId][serverUuid] = newClient;
+    this.addActiveConnection(serverUuid, newClient);
     this.sessionToServers[sessionId].add(serverUuid);
 
     logger.info(
@@ -673,6 +688,7 @@ export class McpServerPool {
     let destroyed = 0;
     for (const [serverUuid, client] of Object.entries(activeSession)) {
       if (this.releaseConnection(client) > 0) continue;
+      this.removeActiveConnection(serverUuid, client);
       if (!this.idleSessions[serverUuid]) {
         this.idleSessions[serverUuid] = client;
         recycled++;
@@ -720,6 +736,8 @@ export class McpServerPool {
     this.sessionTimestamps = {};
     this.serverParamsCache = {};
     this.connectionRefCounts.clear();
+    this.activeClients.clear();
+    this.activeClientsByServer.clear();
     this.pendingConnectionPromises.clear();
 
     // Bump all known generations (never reset to {}) so any in-flight idle
@@ -756,12 +774,7 @@ export class McpServerPool {
    */
   getPoolStatus(): McpServerPoolStatus {
     const idle = Object.keys(this.idleSessions).length;
-    const activeClients = new Set<ConnectedClient>();
-    for (const sessionServers of Object.values(this.activeSessions)) {
-      for (const client of Object.values(sessionServers))
-        activeClients.add(client);
-    }
-    const active = activeClients.size;
+    const active = this.activeClients.size;
 
     // Calculate per-server breakdown
     const perServerCounts: Record<string, number> = {};
@@ -783,12 +796,11 @@ export class McpServerPool {
    * Get total connection count (idle + active + pending)
    */
   private getTotalConnectionCount(): number {
-    const clients = new Set<ConnectedClient>();
-    for (const client of Object.values(this.idleSessions)) clients.add(client);
-    for (const sessionServers of Object.values(this.activeSessions)) {
-      for (const client of Object.values(sessionServers)) clients.add(client);
-    }
-    return clients.size + this.pendingTotalConnections;
+    return (
+      this.activeClients.size +
+      Object.keys(this.idleSessions).length +
+      this.pendingTotalConnections
+    );
   }
 
   /**
@@ -878,7 +890,10 @@ export class McpServerPool {
       delete this.idleSessions[serverUuid];
     }
     this.creatingIdleSessions.delete(serverUuid);
-    for (const client of clients) this.connectionRefCounts.delete(client);
+    for (const client of clients) {
+      this.connectionRefCounts.delete(client);
+      this.removeActiveConnection(serverUuid, client);
+    }
     await Promise.allSettled(
       Array.from(clients, async (client) => {
         try {
@@ -1029,7 +1044,10 @@ export class McpServerPool {
       delete sessionServers[serverUuid];
       this.sessionToServers[sessionId]?.delete(serverUuid);
     }
-    for (const client of clients) this.connectionRefCounts.delete(client);
+    for (const client of clients) {
+      this.connectionRefCounts.delete(client);
+      this.removeActiveConnection(serverUuid, client);
+    }
     await Promise.allSettled(
       Array.from(clients, async (client) => {
         try {

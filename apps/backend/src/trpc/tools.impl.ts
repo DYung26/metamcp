@@ -8,8 +8,12 @@ import { z } from "zod";
 
 import logger from "@/utils/logger";
 
-import { toolsRepository } from "../db/repositories";
+import {
+  namespaceMappingsRepository,
+  toolsRepository,
+} from "../db/repositories";
 import { ToolsSerializer } from "../db/serializers";
+import { clearFilterCache } from "../lib/metamcp/metamcp-middleware/filter-tools.functional";
 import { toolsSyncCache } from "../lib/metamcp/tools-sync-cache";
 
 export const toolsImplementations = {
@@ -85,9 +89,10 @@ export const toolsImplementations = {
       }
 
       // Check if tools changed using hash
-      const hasChanged = toolsSyncCache.hasChanged(
+      const toolsHash = toolsSyncCache.hashTools(input.tools);
+      const hasChanged = toolsSyncCache.hasHashChanged(
         input.mcpServerUuid,
-        input.tools,
+        toolsHash,
       );
 
       if (hasChanged) {
@@ -96,7 +101,22 @@ export const toolsImplementations = {
           tools: input.tools,
           mcpServerUuid: input.mcpServerUuid,
         });
-        toolsSyncCache.update(input.mcpServerUuid, input.tools);
+        toolsSyncCache.updateHash(input.mcpServerUuid, toolsHash);
+
+        try {
+          const namespaceUuids =
+            await namespaceMappingsRepository.findNamespacesByServerUuid(
+              input.mcpServerUuid,
+            );
+          for (const namespaceUuid of namespaceUuids) {
+            clearFilterCache(namespaceUuid);
+          }
+        } catch (error) {
+          logger.warn(
+            `Failed to invalidate tool filter caches for server ${input.mcpServerUuid}:`,
+            error,
+          );
+        }
 
         const message =
           deleted.length > 0
