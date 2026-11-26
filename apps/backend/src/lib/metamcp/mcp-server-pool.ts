@@ -54,8 +54,8 @@ export class McpServerPool {
   private activeClients = new Set<ConnectedClient>();
   private activeClientsByServer = new Map<string, Set<ConnectedClient>>();
 
-  // Mapping: sessionId -> Set<serverUuid> for cleanup tracking
-  private sessionToServers: Record<string, Set<string>> = {};
+  // Mapping: serverUuid -> active session IDs for targeted invalidation
+  private sessionsByServer = new Map<string, Set<string>>();
 
   // Session creation timestamps: sessionId -> timestamp
   private sessionTimestamps: Record<string, number> = {};
@@ -161,6 +161,28 @@ export class McpServerPool {
     this.activeClients.delete(client);
   }
 
+  private addSessionConnection(
+    sessionId: string,
+    serverUuid: string,
+    client: ConnectedClient,
+  ): void {
+    this.activeSessions[sessionId][serverUuid] = client;
+    let sessionIds = this.sessionsByServer.get(serverUuid);
+    if (!sessionIds) {
+      sessionIds = new Set();
+      this.sessionsByServer.set(serverUuid, sessionIds);
+    }
+    sessionIds.add(sessionId);
+  }
+
+  private removeSessionConnection(sessionId: string, serverUuid: string): void {
+    delete this.activeSessions[sessionId]?.[serverUuid];
+    const sessionIds = this.sessionsByServer.get(serverUuid);
+    if (!sessionIds) return;
+    sessionIds.delete(sessionId);
+    if (sessionIds.size === 0) this.sessionsByServer.delete(serverUuid);
+  }
+
   /**
    * Count all connections (idle + active + pending) for a specific server UUID.
    * Indexed sets make this O(1), independent of the number of active sessions.
@@ -263,7 +285,6 @@ export class McpServerPool {
     // Initialize session if it doesn't exist
     if (!this.activeSessions[sessionId]) {
       this.activeSessions[sessionId] = {};
-      this.sessionToServers[sessionId] = new Set();
       this.sessionTimestamps[sessionId] = Date.now();
     }
 
@@ -276,10 +297,8 @@ export class McpServerPool {
         // Convert idle session to active session
         delete this.idleSessions[serverUuid];
         this.connectionRefCounts.set(idleClient, 1);
-        this.activeSessions[sessionId][serverUuid] = idleClient;
+        this.addSessionConnection(sessionId, serverUuid, idleClient);
         this.addActiveConnection(serverUuid, idleClient);
-        this.sessionToServers[sessionId].add(serverUuid);
-
         logger.info(
           `Converted idle session to active for server ${serverUuid}, session ${sessionId}`,
         );
@@ -321,9 +340,8 @@ export class McpServerPool {
             this.retainConnection(pendingClient);
           }
           if (isIdleClient || hasActiveLease) {
-            this.activeSessions[sessionId][serverUuid] = pendingClient;
+            this.addSessionConnection(sessionId, serverUuid, pendingClient);
             this.addActiveConnection(serverUuid, pendingClient);
-            this.sessionToServers[sessionId].add(serverUuid);
             return pendingClient;
           }
           // The owner discarded this connection (e.g. its client session closed
@@ -344,9 +362,8 @@ export class McpServerPool {
           `Reusing existing connection for server ${serverUuid} (at per-server cap ${this.maxConnectionsPerServer})`,
         );
         this.retainConnection(reusable);
-        this.activeSessions[sessionId][serverUuid] = reusable;
+        this.addSessionConnection(sessionId, serverUuid, reusable);
         this.addActiveConnection(serverUuid, reusable);
-        this.sessionToServers[sessionId].add(serverUuid);
         return reusable;
       }
       return undefined;
@@ -378,9 +395,8 @@ export class McpServerPool {
         : this.findOldestActiveConnectionForServer(serverUuid);
       if (reusable) {
         this.retainConnection(reusable);
-        this.activeSessions[sessionId][serverUuid] = reusable;
+        this.addSessionConnection(sessionId, serverUuid, reusable);
         this.addActiveConnection(serverUuid, reusable);
-        this.sessionToServers[sessionId].add(serverUuid);
         return reusable;
       }
       return undefined;
@@ -413,10 +429,8 @@ export class McpServerPool {
     }
 
     this.connectionRefCounts.set(newClient, 1);
-    this.activeSessions[sessionId][serverUuid] = newClient;
+    this.addSessionConnection(sessionId, serverUuid, newClient);
     this.addActiveConnection(serverUuid, newClient);
-    this.sessionToServers[sessionId].add(serverUuid);
-
     logger.info(
       `Created new active session for server ${serverUuid}, session ${sessionId}`,
     );
@@ -687,16 +701,19 @@ export class McpServerPool {
   async cleanupSession(sessionId: string): Promise<void> {
     const activeSession = this.activeSessions[sessionId];
     if (!activeSession) return;
+    const sessionConnections = Object.entries(activeSession);
 
     // Detach synchronously before awaiting cleanup. HTTP close/finish/delete
     // paths can overlap; deleting first makes this operation idempotent.
+    for (const [serverUuid] of sessionConnections) {
+      this.removeSessionConnection(sessionId, serverUuid);
+    }
     delete this.activeSessions[sessionId];
     delete this.sessionTimestamps[sessionId];
-    delete this.sessionToServers[sessionId];
 
     let recycled = 0;
     let destroyed = 0;
-    for (const [serverUuid, client] of Object.entries(activeSession)) {
+    for (const [serverUuid, client] of sessionConnections) {
       if (this.releaseConnection(client) > 0) continue;
       this.removeActiveConnection(serverUuid, client);
       if (!this.idleSessions[serverUuid]) {
@@ -742,7 +759,7 @@ export class McpServerPool {
     // Clear all state
     this.idleSessions = {};
     this.activeSessions = {};
-    this.sessionToServers = {};
+    this.sessionsByServer.clear();
     this.sessionTimestamps = {};
     this.serverParamsCache = {};
     this.connectionRefCounts.clear();
@@ -889,12 +906,12 @@ export class McpServerPool {
       (this.serverConnectionGenerations[serverUuid] ?? 0) + 1;
     this.pendingConnectionPromises.delete(serverUuid);
     const clients = new Set<ConnectedClient>();
-    for (const [sid, sessionServers] of Object.entries(this.activeSessions)) {
-      const client = sessionServers[serverUuid];
+    const sessionIds = this.sessionsByServer.get(serverUuid);
+    for (const sid of sessionIds ? [...sessionIds] : []) {
+      const client = this.activeSessions[sid]?.[serverUuid];
       if (!client) continue;
       clients.add(client);
-      delete sessionServers[serverUuid];
-      this.sessionToServers[sid]?.delete(serverUuid);
+      this.removeSessionConnection(sid, serverUuid);
     }
     const idleClient = this.idleSessions[serverUuid];
     if (idleClient) {
@@ -1047,14 +1064,12 @@ export class McpServerPool {
       clients.add(idleSession);
       delete this.idleSessions[serverUuid];
     }
-    for (const [sessionId, sessionServers] of Object.entries(
-      this.activeSessions,
-    )) {
-      const client = sessionServers[serverUuid];
+    const sessionIds = this.sessionsByServer.get(serverUuid);
+    for (const sessionId of sessionIds ? [...sessionIds] : []) {
+      const client = this.activeSessions[sessionId]?.[serverUuid];
       if (!client) continue;
       clients.add(client);
-      delete sessionServers[serverUuid];
-      this.sessionToServers[sessionId]?.delete(serverUuid);
+      this.removeSessionConnection(sessionId, serverUuid);
     }
     for (const client of clients) {
       this.connectionRefCounts.delete(client);
