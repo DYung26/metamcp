@@ -21,6 +21,7 @@ export type IOType = "overlapped" | "pipe" | "ignore" | "inherit";
 export async function getMcpServers(
   namespaceUuid: string,
   includeInactiveServers: boolean = false,
+  serverUuid?: string,
 ): Promise<Record<string, ServerParameters>> {
   try {
     // Build the where conditions based on includeInactiveServers flag
@@ -35,6 +36,12 @@ export async function getMcpServers(
           namespaceServerMappingsTable.status,
           McpServerStatusEnum.enum.ACTIVE,
         ),
+      );
+    }
+
+    if (serverUuid) {
+      whereConditions.push(
+        eq(namespaceServerMappingsTable.mcp_server_uuid, serverUuid),
       );
     }
 

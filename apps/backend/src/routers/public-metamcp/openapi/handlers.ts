@@ -135,8 +135,10 @@ export const createOriginalCallToolHandler = (
 
     // Resolve the server UUID from the tools/list cache, then ask the pool for
     // the current session instead of scanning every configured server.
-    const serverParams = await getMcpServers(context.namespaceUuid);
     const cachedServerUuid = toolToServerUuid[name];
+    let serverParams = cachedServerUuid
+      ? await getMcpServers(context.namespaceUuid, false, cachedServerUuid)
+      : await getMcpServers(context.namespaceUuid);
     let targetSession = null;
 
     if (cachedServerUuid) {
@@ -157,14 +159,13 @@ export const createOriginalCallToolHandler = (
               cachedServerUuid,
               params.name || sanitizeName(serverName),
             );
-          } else {
-            delete toolToServerUuid[name];
           }
-        } else {
-          delete toolToServerUuid[name];
         }
-      } else {
+      }
+
+      if (!targetSession) {
         delete toolToServerUuid[name];
+        serverParams = await getMcpServers(context.namespaceUuid);
       }
     }
 
