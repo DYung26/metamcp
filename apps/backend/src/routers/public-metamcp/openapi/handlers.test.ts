@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerParameters } from "@repo/zod-types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/utils/logger", () => ({ default: { error: vi.fn() } }));
 vi.mock("@/db", () => ({ db: {} }));
@@ -26,10 +26,11 @@ vi.mock("@/lib/metamcp/metamcp-middleware/tool-identity", () => ({
 }));
 
 import { configService } from "@/lib/config.service";
-import { getMcpServers } from "@/lib/metamcp/fetch-metamcp";
 import type { ConnectedClient } from "@/lib/metamcp/client";
+import { getMcpServers } from "@/lib/metamcp/fetch-metamcp";
 import { mcpServerPool } from "@/lib/metamcp/mcp-server-pool";
 import type { MetaMCPHandlerContext } from "@/lib/metamcp/metamcp-middleware/functional-middleware";
+
 import {
   createOriginalCallToolHandler,
   createOriginalListToolsHandler,

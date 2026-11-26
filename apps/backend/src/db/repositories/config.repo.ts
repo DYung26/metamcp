@@ -1,5 +1,5 @@
-import { eq, inArray } from "drizzle-orm";
 import type { ConfigKey } from "@repo/zod-types";
+import { eq, inArray } from "drizzle-orm";
 
 import { db } from "../index";
 import { configTable } from "../schema";

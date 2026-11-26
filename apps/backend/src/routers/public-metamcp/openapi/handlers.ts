@@ -6,6 +6,7 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { createToolIdentityResolver } from "@/lib/metamcp/metamcp-middleware/tool-identity";
 import logger from "@/utils/logger";
 
 import { configService } from "../../../lib/config.service";
@@ -22,7 +23,6 @@ import {
   ListToolsHandler,
   MetaMCPHandlerContext,
 } from "../../../lib/metamcp/metamcp-middleware/functional-middleware";
-import { createToolIdentityResolver } from "@/lib/metamcp/metamcp-middleware/tool-identity";
 import {
   createToolOverridesCallToolMiddleware,
   createToolOverridesListToolsMiddleware,

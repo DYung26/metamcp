@@ -60,10 +60,7 @@ import {
   ListToolsHandler,
   MetaMCPHandlerContext,
 } from "./metamcp-middleware/functional-middleware";
-import {
-  createToolIdentityResolver,
-  resolveToolIdentity,
-} from "./metamcp-middleware/tool-identity";
+import { createToolIdentityResolver } from "./metamcp-middleware/tool-identity";
 import {
   createToolOverridesCallToolMiddleware,
   createToolOverridesListToolsMiddleware,
