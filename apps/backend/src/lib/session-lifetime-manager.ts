@@ -123,7 +123,7 @@ export class SessionLifetimeManagerImpl<
           `Cleaning up ${expiredSessions.length} expired ${this.name} sessions: ${expiredSessions.map((s) => s.sessionId).join(", ")}`,
         );
 
-        await Promise.allSettled(
+        const cleanupResults = await Promise.allSettled(
           expiredSessions.map(async ({ sessionId, session }) => {
             try {
               // A request may have refreshed the session after the sweep
@@ -142,6 +142,16 @@ export class SessionLifetimeManagerImpl<
             }
           }),
         );
+
+        cleanupResults.forEach((result, index) => {
+          if (result.status === "rejected") {
+            const { sessionId } = expiredSessions[index];
+            logger.error(
+              `Error cleaning up expired ${this.name} session ${sessionId}:`,
+              result.reason,
+            );
+          }
+        });
       }
     } catch (error) {
       logger.error(

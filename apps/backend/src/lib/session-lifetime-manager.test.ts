@@ -84,15 +84,21 @@ describe("SessionLifetimeManagerImpl", () => {
   it("releases the cleanup claim when a callback fails", async () => {
     manager.addSession("session-a", { value: "a" });
     vi.advanceTimersByTime(2_000);
+    const cleanupError = new Error("close failed");
+    vi.mocked(logger.error).mockClear();
     const cleanup = vi
       .fn()
-      .mockRejectedValueOnce(new Error("close failed"))
+      .mockRejectedValueOnce(cleanupError)
       .mockResolvedValueOnce(undefined);
 
     await manager.cleanupExpiredSessions(cleanup);
     await manager.cleanupExpiredSessions(cleanup);
 
     expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledWith(
+      "Error cleaning up expired test session session-a:",
+      cleanupError,
+    );
   });
 
   it("does not close a session that was touched after the sweep snapshot", async () => {
