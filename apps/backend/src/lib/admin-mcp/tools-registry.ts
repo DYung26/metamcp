@@ -41,6 +41,34 @@ export const METAMCP_ADMIN_SERVER_PREFIX = "metamcp-admin";
 
 const emptySchema = z.object({});
 
+const AdminCreateMcpServerRequestSchema = z
+  .object(CreateMcpServerRequestSchema.shape)
+  .omit({
+    user_id: true,
+  })
+  .pipe(CreateMcpServerRequestSchema);
+const AdminUpdateMcpServerRequestSchema = z
+  .object(UpdateMcpServerRequestSchema.shape)
+  .omit({
+    user_id: true,
+  })
+  .pipe(UpdateMcpServerRequestSchema);
+const AdminCreateNamespaceRequestSchema = CreateNamespaceRequestSchema.omit({
+  user_id: true,
+});
+const AdminUpdateNamespaceRequestSchema = UpdateNamespaceRequestSchema.omit({
+  user_id: true,
+});
+const AdminCreateEndpointRequestSchema = CreateEndpointRequestSchema.omit({
+  user_id: true,
+});
+const AdminUpdateEndpointRequestSchema = UpdateEndpointRequestSchema.omit({
+  user_id: true,
+});
+const AdminCreateApiKeyRequestSchema = CreateApiKeyRequestSchema.omit({
+  user_id: true,
+});
+
 export interface AdminToolDefinition {
   name: string;
   description: string;
@@ -93,29 +121,47 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
   defineTool(
     "metamcp_create_mcp_server",
     "Create a new upstream MCP server (STDIO, SSE, or STREAMABLE_HTTP).",
-    CreateMcpServerRequestSchema,
+    AdminCreateMcpServerRequestSchema,
     async (userId, input) =>
       mcpServersImplementations.create(
-        CreateMcpServerRequestSchema.parse(input),
+        AdminCreateMcpServerRequestSchema.parse(input),
         userId,
       ),
   ),
   defineTool(
     "metamcp_update_mcp_server",
     "Update an existing MCP server configuration.",
-    UpdateMcpServerRequestSchema,
-    async (userId, input) =>
-      mcpServersImplementations.update(
-        UpdateMcpServerRequestSchema.parse(input),
+    AdminUpdateMcpServerRequestSchema,
+    async (userId, input) => {
+      const parsedInput = AdminUpdateMcpServerRequestSchema.parse(input);
+      const server = await mcpServersImplementations.get(
+        { uuid: parsedInput.uuid },
         userId,
-      ),
+      );
+      if (!server.success || !server.data || server.data.user_id !== userId) {
+        return {
+          success: false,
+          message: "Access denied: You can only update MCP servers you own",
+        };
+      }
+      return mcpServersImplementations.update(parsedInput, userId);
+    },
   ),
   defineTool(
     "metamcp_delete_mcp_server",
     "Delete an MCP server by UUID.",
     z.object({ uuid: z.string() }),
-    async (userId, input) =>
-      mcpServersImplementations.delete(input as { uuid: string }, userId),
+    async (userId, input) => {
+      const parsedInput = z.object({ uuid: z.string() }).parse(input);
+      const server = await mcpServersImplementations.get(parsedInput, userId);
+      if (!server.success || !server.data || server.data.user_id !== userId) {
+        return {
+          success: false,
+          message: "Access denied: You can only delete MCP servers you own",
+        };
+      }
+      return mcpServersImplementations.delete(parsedInput, userId);
+    },
   ),
   defineTool(
     "metamcp_bulk_import_mcp_servers",
@@ -155,29 +201,58 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
   defineTool(
     "metamcp_create_namespace",
     "Create a new namespace grouping MCP servers.",
-    CreateNamespaceRequestSchema,
+    AdminCreateNamespaceRequestSchema,
     async (userId, input) =>
       namespacesImplementations.create(
-        CreateNamespaceRequestSchema.parse(input),
+        AdminCreateNamespaceRequestSchema.parse(input),
         userId,
       ),
   ),
   defineTool(
     "metamcp_update_namespace",
     "Update a namespace name, description, or server membership.",
-    UpdateNamespaceRequestSchema,
-    async (userId, input) =>
-      namespacesImplementations.update(
-        UpdateNamespaceRequestSchema.parse(input),
+    AdminUpdateNamespaceRequestSchema,
+    async (userId, input) => {
+      const parsedInput = AdminUpdateNamespaceRequestSchema.parse(input);
+      const namespace = await namespacesImplementations.get(
+        { uuid: parsedInput.uuid },
         userId,
-      ),
+      );
+      if (
+        !namespace.success ||
+        !namespace.data ||
+        namespace.data.user_id !== userId
+      ) {
+        return {
+          success: false,
+          message: "Access denied: You can only update namespaces you own",
+        };
+      }
+      return namespacesImplementations.update(parsedInput, userId);
+    },
   ),
   defineTool(
     "metamcp_delete_namespace",
     "Delete a namespace by UUID.",
     z.object({ uuid: z.string() }),
-    async (userId, input) =>
-      namespacesImplementations.delete(input as { uuid: string }, userId),
+    async (userId, input) => {
+      const parsedInput = z.object({ uuid: z.string() }).parse(input);
+      const namespace = await namespacesImplementations.get(
+        parsedInput,
+        userId,
+      );
+      if (
+        !namespace.success ||
+        !namespace.data ||
+        namespace.data.user_id !== userId
+      ) {
+        return {
+          success: false,
+          message: "Access denied: You can only delete namespaces you own",
+        };
+      }
+      return namespacesImplementations.delete(parsedInput, userId);
+    },
   ),
   defineTool(
     "metamcp_update_namespace_server_status",
@@ -237,29 +312,55 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
   defineTool(
     "metamcp_create_endpoint",
     "Create a new public endpoint exposing a namespace.",
-    CreateEndpointRequestSchema,
+    AdminCreateEndpointRequestSchema,
     async (userId, input) =>
       endpointsImplementations.create(
-        CreateEndpointRequestSchema.parse(input),
+        AdminCreateEndpointRequestSchema.parse(input),
         userId,
       ),
   ),
   defineTool(
     "metamcp_update_endpoint",
     "Update an existing endpoint configuration.",
-    UpdateEndpointRequestSchema,
-    async (userId, input) =>
-      endpointsImplementations.update(
-        UpdateEndpointRequestSchema.parse(input),
+    AdminUpdateEndpointRequestSchema,
+    async (userId, input) => {
+      const parsedInput = AdminUpdateEndpointRequestSchema.parse(input);
+      const endpoint = await endpointsImplementations.get(
+        { uuid: parsedInput.uuid },
         userId,
-      ),
+      );
+      if (
+        !endpoint.success ||
+        !endpoint.data ||
+        endpoint.data.user_id !== userId
+      ) {
+        return {
+          success: false,
+          message: "Access denied: You can only update endpoints you own",
+        };
+      }
+      return endpointsImplementations.update(parsedInput, userId);
+    },
   ),
   defineTool(
     "metamcp_delete_endpoint",
     "Delete an endpoint by UUID.",
     z.object({ uuid: z.string() }),
-    async (userId, input) =>
-      endpointsImplementations.delete(input as { uuid: string }, userId),
+    async (userId, input) => {
+      const parsedInput = z.object({ uuid: z.string() }).parse(input);
+      const endpoint = await endpointsImplementations.get(parsedInput, userId);
+      if (
+        !endpoint.success ||
+        !endpoint.data ||
+        endpoint.data.user_id !== userId
+      ) {
+        return {
+          success: false,
+          message: "Access denied: You can only delete endpoints you own",
+        };
+      }
+      return endpointsImplementations.delete(parsedInput, userId);
+    },
   ),
 
   // API Keys
@@ -272,10 +373,10 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
   defineTool(
     "metamcp_create_api_key",
     "Create a new API key for MetaMCP authentication.",
-    CreateApiKeyRequestSchema,
+    AdminCreateApiKeyRequestSchema,
     async (userId, input) =>
       apiKeysImplementations.create(
-        CreateApiKeyRequestSchema.parse(input),
+        AdminCreateApiKeyRequestSchema.parse(input),
         userId,
       ),
   ),
