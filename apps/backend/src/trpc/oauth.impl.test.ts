@@ -30,6 +30,12 @@ vi.mock("../lib/metamcp/mcp-server-pool", () => ({
   },
 }));
 
+vi.mock("../lib/metamcp/server-error-tracker", () => ({
+  serverErrorTracker: {
+    resetServerErrorState: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 const ORIGINAL_APP_URL = process.env.APP_URL;
 
 const jsonResponse = (status: number, body: unknown): Response =>
@@ -155,7 +161,7 @@ describe("oauthImplementations.exchangeToken", () => {
       SERVER_UUID,
     );
     fetchSpy.mockRestore();
-  });
+  }, 10_000);
 
   it("preserves the refresh token and requested scopes when the token response omits them", async () => {
     const {

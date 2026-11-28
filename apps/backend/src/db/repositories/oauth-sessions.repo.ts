@@ -109,6 +109,7 @@ export class OAuthSessionsRepository {
         }),
         ...(input.tokens && { tokens: input.tokens }),
         ...(input.code_verifier && { code_verifier: input.code_verifier }),
+        ...(input.expected_state && { expected_state: input.expected_state }),
       })
       .onConflictDoUpdate({
         target: oauthSessionsTable.mcp_server_uuid,
@@ -118,6 +119,7 @@ export class OAuthSessionsRepository {
           }),
           ...(input.tokens && { tokens: input.tokens }),
           ...(input.code_verifier && { code_verifier: input.code_verifier }),
+          ...(input.expected_state && { expected_state: input.expected_state }),
           updated_at: sql`NOW()`,
         },
       })
