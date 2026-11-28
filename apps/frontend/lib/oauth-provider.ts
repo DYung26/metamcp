@@ -363,6 +363,35 @@ class DbOAuthClientProvider implements OAuthClientProvider {
     }
   }
 
+  // The MCP SDK calls this after an invalid_grant refresh response. For a
+  // token-only invalidation, keep the registered client but make the retry
+  // skip expired tokens and start a fresh authorization redirect.
+  invalidateCredentials(
+    scope: "all" | "client" | "tokens" | "verifier" | "discovery",
+  ) {
+    if (scope === "all" || scope === "client") {
+      this.forceClientRegistration = true;
+    }
+
+    if (
+      scope === "all" ||
+      scope === "client" ||
+      scope === "tokens" ||
+      scope === "verifier"
+    ) {
+      this.forceAuthorization = true;
+    }
+
+    if (
+      (scope === "all" || scope === "verifier") &&
+      typeof window !== "undefined"
+    ) {
+      sessionStorage.removeItem(
+        getServerSpecificKey(SESSION_KEYS.CODE_VERIFIER, this.serverUrl),
+      );
+    }
+  }
+
   async saveTokens(tokens: OAuthTokens) {
     // Save to session storage during OAuth flow
     const key = getServerSpecificKey(SESSION_KEYS.TOKENS, this.serverUrl);

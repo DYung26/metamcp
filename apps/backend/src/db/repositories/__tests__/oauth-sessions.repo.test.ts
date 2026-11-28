@@ -56,6 +56,7 @@ vi.mock("../../index", () => {
                     client_information: values.client_information ?? {},
                     tokens: values.tokens ?? null,
                     code_verifier: values.code_verifier ?? null,
+                    expected_state: values.expected_state ?? null,
                     created_at: now,
                     updated_at: now,
                   };
@@ -146,6 +147,46 @@ describe("OAuthSessionsRepository.upsert", () => {
     expect(setOnSecond).toHaveProperty("code_verifier");
     expect(setOnSecond).not.toHaveProperty("tokens");
     expect(setOnSecond).not.toHaveProperty("client_information");
+  });
+
+  it("persists expected_state on insert and conflict update", async () => {
+    const created = await repo.upsert({
+      mcp_server_uuid: serverId,
+      expected_state: "first-state",
+    });
+
+    expect(created.expected_state).toBe("first-state");
+    expect(valuesCalls[0]).toHaveProperty("expected_state", "first-state");
+    expect(onConflictSetCalls[0]).toHaveProperty(
+      "expected_state",
+      "first-state",
+    );
+
+    const updated = await repo.upsert({
+      mcp_server_uuid: serverId,
+      expected_state: "next-state",
+    });
+
+    expect(updated.expected_state).toBe("next-state");
+    expect(valuesCalls[1]).toHaveProperty("expected_state", "next-state");
+    expect(onConflictSetCalls[1]).toHaveProperty(
+      "expected_state",
+      "next-state",
+    );
+  });
+
+  it("partial upsert without expected_state preserves the existing nonce", async () => {
+    await repo.upsert({
+      mcp_server_uuid: serverId,
+      expected_state: "pending-state",
+    });
+    const updated = await repo.upsert({
+      mcp_server_uuid: serverId,
+      tokens: { access_token: "tok", token_type: "Bearer" } as OAuthTokens,
+    });
+
+    expect(updated.expected_state).toBe("pending-state");
+    expect(onConflictSetCalls[1]).not.toHaveProperty("expected_state");
   });
 
   it("partial upsert with only tokens does not clear an existing code_verifier", async () => {
